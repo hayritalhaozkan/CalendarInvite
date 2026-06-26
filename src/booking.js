@@ -286,6 +286,8 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
               });
           }
 
+          function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
           document.getElementById('booking-form').addEventListener('submit', function(e) {
             e.preventDefault();
             var form = e.target;
@@ -324,10 +326,10 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
               conf.style.display = '';
               var startLocal = new Date(b.start_time).toLocaleString(undefined, { timeZone: tz, dateStyle: 'full', timeStyle: 'short' });
               var endLocal = new Date(b.end_time).toLocaleTimeString(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit' });
-              var details = '<p><strong>' + b.title + '</strong></p>';
-              details += '<p>' + startLocal + ' - ' + endLocal + ' (' + b.duration_minutes + ' min)</p>';
-              if (b.meeting_link) details += '<p>Meeting link: <a href="' + b.meeting_link + '">' + b.meeting_link + '</a></p>';
-              details += '<p>Attendees: ' + b.attendees.join(', ') + '</p>';
+              var details = '<p><strong>' + esc(b.title) + '</strong></p>';
+              details += '<p>' + esc(startLocal) + ' - ' + esc(endLocal) + ' (' + b.duration_minutes + ' min)</p>';
+              if (b.meeting_link) details += '<p>Meeting link: <a href="' + esc(b.meeting_link) + '">' + esc(b.meeting_link) + '</a></p>';
+              details += '<p>Attendees: ' + b.attendees.map(esc).join(', ') + '</p>';
               document.getElementById('confirmation-details').innerHTML = details;
             });
           });
@@ -464,6 +466,14 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
     }
     if (!EMAIL_REGEX.test(email)) {
       return reply.code(400).send({ error: 'invalid email format' });
+    }
+
+    if (additional_attendees && Array.isArray(additional_attendees)) {
+      for (const attendeeEmail of additional_attendees) {
+        if (attendeeEmail && !EMAIL_REGEX.test(attendeeEmail)) {
+          return reply.code(400).send({ error: 'invalid additional attendee email format' });
+        }
+      }
     }
 
     const durationMinutes = parseInt(duration, 10);
