@@ -34,7 +34,58 @@ function parseAttendeesFromBody(body) {
   return arr.filter(e => e && e.trim()).map(e => e.trim());
 }
 
-function profileFormHtml(token, profile, calendars, attendees, schedules, error) {
+function overridesHtml(token, profile, overrides) {
+  const today = new Date().toISOString().split('T')[0];
+
+  const overrideRows = overrides.map(o => {
+    const isPast = o.date < today;
+    const cssClass = isPast ? 'past-override' : '';
+    const typeLabel = o.is_blocked ? 'Blocked' : 'Custom';
+    let rangesDisplay = '';
+    if (!o.is_blocked && o.custom_ranges) {
+      const ranges = JSON.parse(o.custom_ranges);
+      rangesDisplay = ranges.map(r => `${r.start} - ${r.end}`).join(', ');
+    }
+    const deleteBtn = isPast ? '' : `
+      <form method="POST" action="/admin/profiles/${profile.id}/overrides/${o.id}/delete" style="display:inline">
+        <input type="hidden" name="_csrf" value="${token}">
+        <button type="submit" class="secondary outline">Delete</button>
+      </form>`;
+    return `<tr class="${cssClass}"><td>${o.date}</td><td>${typeLabel}</td><td>${rangesDisplay}</td><td>${deleteBtn}</td></tr>`;
+  }).join('');
+
+  return `
+    <fieldset>
+      <legend>Schedule Overrides</legend>
+      ${overrides.length ? `
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Hours</th><th>Actions</th></tr></thead>
+          <tbody>${overrideRows}</tbody>
+        </table>
+      ` : '<p>No overrides configured.</p>'}
+      <details>
+        <summary>Add Override</summary>
+        <form method="POST" action="/admin/profiles/${profile.id}/overrides">
+          <input type="hidden" name="_csrf" value="${token}">
+          <label>Date <input type="date" name="date" required></label>
+          <label>Type
+            <select name="override_type">
+              <option value="blocked">Block entire day</option>
+              <option value="custom">Custom hours</option>
+            </select>
+          </label>
+          <div>
+            <label>Custom hours (if custom type):</label>
+            <div><input type="time" name="custom_start[]" value=""> - <input type="time" name="custom_end[]" value=""></div>
+          </div>
+          <button type="submit">Add Override</button>
+        </form>
+      </details>
+    </fieldset>
+  `;
+}
+
+function profileFormHtml(token, profile, calendars, attendees, schedules, error, overrides) {
   const isEdit = !!profile;
   const action = isEdit ? `/admin/profiles/${profile.id}` : '/admin/profiles';
   const title = isEdit ? 'Edit Profile' : 'New Profile';
@@ -66,6 +117,8 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error)
       : `<div><input type="time" name="schedule[${dayIdx}][start][]" value=""> - <input type="time" name="schedule[${dayIdx}][end][]" value=""></div>`;
     return `<fieldset><legend>${dayName}</legend>${ranges}</fieldset>`;
   }).join('');
+
+  const overrideSection = isEdit ? overridesHtml(token, profile, overrides || []) : '';
 
   return `
     <h1>${title}</h1>
@@ -99,6 +152,7 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error)
       </fieldset>
       <button type="submit">${isEdit ? 'Update' : 'Create'} Profile</button>
     </form>
+    ${overrideSection}
     <a href="/admin/profiles">&larr; Back to profiles</a>
   `;
 }
@@ -193,8 +247,9 @@ function registerProfileRoutes(app) {
     const attendees = app.db.prepare("SELECT email FROM default_attendees WHERE profile_id = ?").all(profile.id).map(a => a.email);
     const templates = app.db.prepare("SELECT * FROM schedule_templates WHERE profile_id = ? ORDER BY day_of_week, start_time").all(profile.id);
     const readCalendarIds = app.db.prepare("SELECT calendar_connection_id FROM profile_read_calendars WHERE profile_id = ?").all(profile.id).map(r => r.calendar_connection_id);
+    const overrides = app.db.prepare("SELECT * FROM schedule_overrides WHERE profile_id = ? ORDER BY date").all(profile.id);
 
-    const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, null);
+    const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, null, overrides);
     reply.type('text/html').send(require('./app').BASE_LAYOUT('Edit Profile', html));
   });
 
@@ -270,6 +325,63 @@ function registerProfileRoutes(app) {
     const { id } = request.params;
     app.db.prepare("UPDATE booking_profiles SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?").run(id);
     return reply.redirect('/admin/profiles');
+  });
+
+  app.post('/profiles/:id/overrides', { preHandler: app.csrfProtection }, async (request, reply) => {
+    const { id } = request.params;
+    const profile = app.db.prepare("SELECT * FROM booking_profiles WHERE id = ?").get(id);
+    if (!profile) {
+      return reply.code(404).type('text/html').send(require('./app').BASE_LAYOUT('Not Found', '<h1>Profile not found</h1>'));
+    }
+
+    const { date, override_type } = request.body || {};
+
+    if (!date) {
+      const token = reply.generateCsrf();
+      const calendars = app.db.prepare("SELECT * FROM calendar_connections WHERE status = 'connected'").all();
+      const attendees = app.db.prepare("SELECT email FROM default_attendees WHERE profile_id = ?").all(profile.id).map(a => a.email);
+      const templates = app.db.prepare("SELECT * FROM schedule_templates WHERE profile_id = ? ORDER BY day_of_week, start_time").all(profile.id);
+      const readCalendarIds = app.db.prepare("SELECT calendar_connection_id FROM profile_read_calendars WHERE profile_id = ?").all(profile.id).map(r => r.calendar_connection_id);
+      const overrides = app.db.prepare("SELECT * FROM schedule_overrides WHERE profile_id = ? ORDER BY date").all(profile.id);
+      const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, 'Date is required', overrides);
+      return reply.type('text/html').send(require('./app').BASE_LAYOUT('Edit Profile', html));
+    }
+
+    const existing = app.db.prepare("SELECT id FROM schedule_overrides WHERE profile_id = ? AND date = ?").get(id, date);
+    if (existing) {
+      const token = reply.generateCsrf();
+      const calendars = app.db.prepare("SELECT * FROM calendar_connections WHERE status = 'connected'").all();
+      const attendees = app.db.prepare("SELECT email FROM default_attendees WHERE profile_id = ?").all(profile.id).map(a => a.email);
+      const templates = app.db.prepare("SELECT * FROM schedule_templates WHERE profile_id = ? ORDER BY day_of_week, start_time").all(profile.id);
+      const readCalendarIds = app.db.prepare("SELECT calendar_connection_id FROM profile_read_calendars WHERE profile_id = ?").all(profile.id).map(r => r.calendar_connection_id);
+      const overrides = app.db.prepare("SELECT * FROM schedule_overrides WHERE profile_id = ? ORDER BY date").all(profile.id);
+      const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, 'An override for this date already exists', overrides);
+      return reply.type('text/html').send(require('./app').BASE_LAYOUT('Edit Profile', html));
+    }
+
+    if (override_type === 'custom') {
+      const starts = request.body['custom_start[]'];
+      const ends = request.body['custom_end[]'];
+      const startArr = Array.isArray(starts) ? starts : [starts];
+      const endArr = Array.isArray(ends) ? ends : [ends];
+      const ranges = [];
+      for (let i = 0; i < startArr.length; i++) {
+        if (startArr[i] && endArr[i]) {
+          ranges.push({ start: startArr[i], end: endArr[i] });
+        }
+      }
+      app.db.prepare("INSERT INTO schedule_overrides (profile_id, date, is_blocked, custom_ranges) VALUES (?, ?, 0, ?)").run(id, date, JSON.stringify(ranges));
+    } else {
+      app.db.prepare("INSERT INTO schedule_overrides (profile_id, date, is_blocked, custom_ranges) VALUES (?, ?, 1, NULL)").run(id, date);
+    }
+
+    return reply.redirect(`/admin/profiles/${id}/edit`);
+  });
+
+  app.post('/profiles/:id/overrides/:overrideId/delete', { preHandler: app.csrfProtection }, async (request, reply) => {
+    const { id, overrideId } = request.params;
+    app.db.prepare("DELETE FROM schedule_overrides WHERE id = ? AND profile_id = ?").run(overrideId, id);
+    return reply.redirect(`/admin/profiles/${id}/edit`);
   });
 }
 
