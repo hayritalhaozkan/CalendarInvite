@@ -4,6 +4,10 @@ const cookie = require('@fastify/cookie');
 const session = require('@fastify/session');
 const { createDatabase } = require('./db');
 
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 const BASE_LAYOUT = (title, body) => `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -28,8 +32,12 @@ function buildApp(opts = {}) {
 
   app.register(formbody);
   app.register(cookie);
+  const sessionSecret = opts.sessionSecret || process.env.SESSION_SECRET;
+  if (!sessionSecret) {
+    throw new Error('SESSION_SECRET environment variable is required');
+  }
   app.register(session, {
-    secret: opts.sessionSecret || process.env.SESSION_SECRET || 'a'.repeat(32),
+    secret: sessionSecret,
     cookie: { secure: false, httpOnly: true, sameSite: 'lax' },
   });
 
@@ -56,9 +64,10 @@ function buildApp(opts = {}) {
   app.register(async function publicRoutes(app) {
     app.get('/:slug', async (request, reply) => {
       const { slug } = request.params;
-      reply.type('text/html').send(BASE_LAYOUT(`Book - ${slug}`, `
+      const safeSlug = escapeHtml(slug);
+      reply.type('text/html').send(BASE_LAYOUT(`Book - ${safeSlug}`, `
         <h1>Book a meeting</h1>
-        <p>Booking page for <strong>${slug}</strong></p>
+        <p>Booking page for <strong>${safeSlug}</strong></p>
       `));
     });
   }, { prefix: '/book' });

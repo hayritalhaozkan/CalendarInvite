@@ -6,7 +6,7 @@ describe('Server', () => {
   let app;
 
   before(async () => {
-    app = buildApp({ dbPath: ':memory:' });
+    app = buildApp({ dbPath: ':memory:', sessionSecret: 'test-secret-that-is-at-least-32-characters-long' });
     await app.ready();
   });
 
