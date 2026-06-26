@@ -8,6 +8,7 @@ const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
 const { buildGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserEmail } = require('./google');
 const { encrypt, decrypt } = require('./encryption');
+const { registerProfileRoutes } = require('./profiles');
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -323,6 +324,8 @@ function buildApp(opts = {}) {
       app.db.prepare('DELETE FROM calendar_connections WHERE id = ?').run(id);
       return reply.redirect('/admin/calendars');
     });
+
+    registerProfileRoutes(app);
   }, { prefix: '/admin' });
 
   app.register(async function publicRoutes(app) {
