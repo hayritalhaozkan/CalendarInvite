@@ -346,4 +346,4 @@ function buildApp(opts = {}) {
   return app;
 }
 
-module.exports = { buildApp };
+module.exports = { buildApp, BASE_LAYOUT };
