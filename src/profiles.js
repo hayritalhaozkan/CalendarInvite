@@ -44,14 +44,14 @@ function overridesHtml(token, profile, overrides) {
     let rangesDisplay = '';
     if (!o.is_blocked && o.custom_ranges) {
       const ranges = JSON.parse(o.custom_ranges);
-      rangesDisplay = ranges.map(r => `${r.start} - ${r.end}`).join(', ');
+      rangesDisplay = ranges.map(r => `${escapeHtml(r.start)} - ${escapeHtml(r.end)}`).join(', ');
     }
     const deleteBtn = isPast ? '' : `
       <form method="POST" action="/admin/profiles/${profile.id}/overrides/${o.id}/delete" style="display:inline">
         <input type="hidden" name="_csrf" value="${token}">
         <button type="submit" class="secondary outline">Delete</button>
       </form>`;
-    return `<tr class="${cssClass}"><td>${o.date}</td><td>${typeLabel}</td><td>${rangesDisplay}</td><td>${deleteBtn}</td></tr>`;
+    return `<tr class="${cssClass}"><td>${escapeHtml(o.date)}</td><td>${typeLabel}</td><td>${rangesDisplay}</td><td>${deleteBtn}</td></tr>`;
   }).join('');
 
   return `
@@ -380,6 +380,10 @@ function registerProfileRoutes(app) {
 
   app.post('/profiles/:id/overrides/:overrideId/delete', { preHandler: app.csrfProtection }, async (request, reply) => {
     const { id, overrideId } = request.params;
+    const profile = app.db.prepare("SELECT * FROM booking_profiles WHERE id = ?").get(id);
+    if (!profile) {
+      return reply.code(404).type('text/html').send(require('./app').BASE_LAYOUT('Not Found', '<h1>Profile not found</h1>'));
+    }
     app.db.prepare("DELETE FROM schedule_overrides WHERE id = ? AND profile_id = ?").run(overrideId, id);
     return reply.redirect(`/admin/profiles/${id}/edit`);
   });

@@ -57,7 +57,8 @@ function initializeSchema(db) {
       profile_id INTEGER NOT NULL REFERENCES booking_profiles(id) ON DELETE CASCADE,
       date TEXT NOT NULL,
       is_blocked INTEGER NOT NULL DEFAULT 0,
-      custom_ranges TEXT
+      custom_ranges TEXT,
+      UNIQUE(profile_id, date)
     );
 
     CREATE TABLE IF NOT EXISTS bookings (
