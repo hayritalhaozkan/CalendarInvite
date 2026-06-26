@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const fastify = require('fastify');
 const formbody = require('@fastify/formbody');
 const cookie = require('@fastify/cookie');
@@ -6,7 +7,7 @@ const csrf = require('@fastify/csrf-protection');
 const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
 const { buildGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserEmail } = require('./google');
-const { encrypt } = require('./encryption');
+const { encrypt, decrypt } = require('./encryption');
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -37,6 +38,7 @@ function buildApp(opts = {}) {
   const googleRedirectUri = opts.googleRedirectUri || process.env.GOOGLE_REDIRECT_URI;
 
   app.decorate('db', db);
+  app.decorate('fetchFn', opts.fetchFn || globalThis.fetch);
 
   app.register(formbody);
   app.register(cookie);
@@ -143,6 +145,7 @@ function buildApp(opts = {}) {
       reply.type('text/html').send(BASE_LAYOUT('Calendar Connections', `
         <h1>Calendar Connections</h1>
         <a href="/admin/calendars/connect/google" role="button">Connect Google Calendar</a>
+        <a href="/admin/calendars/connect/microsoft" role="button">Connect Office 365 Calendar</a>
         ${connections.length ? `
           <table>
             <thead><tr><th>Provider</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead>
@@ -179,6 +182,80 @@ function buildApp(opts = {}) {
         request.log.error(err);
         return reply.redirect('/admin/calendars?error=oauth_failed');
       }
+    });
+
+    app.get('/calendars/connect/microsoft', async (request, reply) => {
+      const clientId = opts.microsoftClientId || process.env.MICROSOFT_CLIENT_ID;
+      const tenantId = opts.microsoftTenantId || process.env.MICROSOFT_TENANT_ID;
+      const redirectUri = opts.microsoftRedirectUri || process.env.MICROSOFT_REDIRECT_URI;
+      const scope = 'offline_access Calendars.ReadWrite User.Read';
+      const state = crypto.randomBytes(16).toString('hex');
+      request.session.set('oauthState', state);
+      const authUrl = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`);
+      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('scope', scope);
+      authUrl.searchParams.set('response_mode', 'query');
+      authUrl.searchParams.set('state', state);
+      return reply.redirect(authUrl.toString());
+    });
+
+    app.get('/calendars/callback/microsoft', async (request, reply) => {
+      const { code, state } = request.query;
+      if (!code) {
+        return reply.status(400).send('Missing authorization code');
+      }
+      const expectedState = request.session.get('oauthState');
+      if (!state || state !== expectedState) {
+        return reply.status(403).send('Invalid OAuth state');
+      }
+      request.session.set('oauthState', null);
+
+      const clientId = opts.microsoftClientId || process.env.MICROSOFT_CLIENT_ID;
+      const clientSecret = opts.microsoftClientSecret || process.env.MICROSOFT_CLIENT_SECRET;
+      const tenantId = opts.microsoftTenantId || process.env.MICROSOFT_TENANT_ID;
+      const redirectUri = opts.microsoftRedirectUri || process.env.MICROSOFT_REDIRECT_URI;
+
+      const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+      const tokenResponse = await app.fetchFn(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+          scope: 'offline_access Calendars.ReadWrite User.Read',
+        }).toString(),
+      });
+
+      const tokenData = await tokenResponse.json();
+      if (!tokenResponse.ok) {
+        return reply.status(502).send('Failed to exchange authorization code');
+      }
+
+      const meResponse = await app.fetchFn('https://graph.microsoft.com/v1.0/me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const meData = await meResponse.json();
+
+      const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+
+      app.db.prepare(`
+        INSERT INTO calendar_connections (provider, encrypted_access_token, encrypted_refresh_token, token_expiry, email, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        'microsoft',
+        encrypt(tokenData.access_token, encryptionKey),
+        encrypt(tokenData.refresh_token, encryptionKey),
+        expiresAt,
+        meData.mail || meData.userPrincipalName,
+        'connected'
+      );
+
+      return reply.redirect('/admin/calendars');
     });
 
     app.post('/calendars/:id/disconnect', { preHandler: app.csrfProtection }, async (request, reply) => {
