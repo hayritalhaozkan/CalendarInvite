@@ -9,6 +9,7 @@ const { createDatabase } = require('./db');
 const { buildGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserEmail } = require('./google');
 const { encrypt, decrypt } = require('./encryption');
 const { registerProfileRoutes } = require('./profiles');
+const { registerBookingRoutes, registerSlotsApi } = require('./booking');
 
 const TIMEZONES = [
   'UTC',
@@ -416,15 +417,12 @@ function buildApp(opts = {}) {
   }, { prefix: '/admin' });
 
   app.register(async function publicRoutes(app) {
-    app.get('/:slug', async (request, reply) => {
-      const { slug } = request.params;
-      const safeSlug = escapeHtml(slug);
-      reply.type('text/html').send(BASE_LAYOUT(`Book - ${safeSlug}`, `
-        <h1>Book a meeting</h1>
-        <p>Booking page for <strong>${safeSlug}</strong></p>
-      `));
-    });
+    registerBookingRoutes(app, { encryptionKey, baseLayout: BASE_LAYOUT });
   }, { prefix: '/book' });
+
+  app.register(async function publicApi(app) {
+    registerSlotsApi(app, { encryptionKey });
+  }, { prefix: '/api/book' });
 
   app.addHook('onClose', () => {
     db.close();
