@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const fastify = require('fastify');
 const formbody = require('@fastify/formbody');
 const cookie = require('@fastify/cookie');
@@ -149,20 +150,28 @@ function buildApp(opts = {}) {
       const tenantId = opts.microsoftTenantId || process.env.MICROSOFT_TENANT_ID;
       const redirectUri = opts.microsoftRedirectUri || process.env.MICROSOFT_REDIRECT_URI;
       const scope = 'offline_access Calendars.ReadWrite User.Read';
+      const state = crypto.randomBytes(16).toString('hex');
+      request.session.set('oauthState', state);
       const authUrl = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`);
       authUrl.searchParams.set('client_id', clientId);
       authUrl.searchParams.set('response_type', 'code');
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('scope', scope);
       authUrl.searchParams.set('response_mode', 'query');
+      authUrl.searchParams.set('state', state);
       return reply.redirect(authUrl.toString());
     });
 
     app.get('/calendars/callback/microsoft', async (request, reply) => {
-      const { code } = request.query;
+      const { code, state } = request.query;
       if (!code) {
         return reply.status(400).send('Missing authorization code');
       }
+      const expectedState = request.session.get('oauthState');
+      if (!state || state !== expectedState) {
+        return reply.status(403).send('Invalid OAuth state');
+      }
+      request.session.set('oauthState', null);
 
       const clientId = opts.microsoftClientId || process.env.MICROSOFT_CLIENT_ID;
       const clientSecret = opts.microsoftClientSecret || process.env.MICROSOFT_CLIENT_SECRET;

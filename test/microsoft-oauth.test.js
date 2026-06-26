@@ -78,6 +78,7 @@ describe('Microsoft OAuth2 Calendar Connection', () => {
       assert.equal(url.searchParams.get('response_type'), 'code');
       assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:3000/admin/calendars/callback/microsoft');
       assert.ok(url.searchParams.get('scope').includes('Calendars.ReadWrite'));
+      assert.ok(url.searchParams.get('state'), 'Should include a state parameter');
     });
   });
 
@@ -158,10 +159,20 @@ describe('Microsoft OAuth2 Calendar Connection', () => {
 
       app.fetchFn = mockFetch;
 
+      // First hit connect to set the state in session
+      const connectResponse = await app.inject({
+        method: 'GET',
+        url: '/admin/calendars/connect/microsoft',
+        headers: { cookie: Array.isArray(sessionCookies) ? sessionCookies.join('; ') : sessionCookies },
+      });
+      const location = new URL(connectResponse.headers.location);
+      const state = location.searchParams.get('state');
+      const connectCookies = connectResponse.headers['set-cookie'] || sessionCookies;
+
       const response = await app.inject({
         method: 'GET',
-        url: '/admin/calendars/callback/microsoft?code=auth-code-xyz',
-        headers: { cookie: Array.isArray(sessionCookies) ? sessionCookies.join('; ') : sessionCookies },
+        url: `/admin/calendars/callback/microsoft?code=auth-code-xyz&state=${state}`,
+        headers: { cookie: Array.isArray(connectCookies) ? connectCookies.join('; ') : connectCookies },
       });
 
       assert.equal(response.statusCode, 302);
@@ -177,6 +188,15 @@ describe('Microsoft OAuth2 Calendar Connection', () => {
 
       // Clean up for other tests
       app.db.prepare('DELETE FROM calendar_connections WHERE id = ?').run(connection.id);
+    });
+
+    it('rejects callback with missing or invalid state parameter', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/calendars/callback/microsoft?code=auth-code-xyz&state=invalid',
+        headers: { cookie: Array.isArray(sessionCookies) ? sessionCookies.join('; ') : sessionCookies },
+      });
+      assert.equal(response.statusCode, 403);
     });
   });
 });
