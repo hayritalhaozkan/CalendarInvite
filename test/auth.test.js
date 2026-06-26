@@ -7,7 +7,7 @@ describe('Admin Auth', () => {
   let app;
 
   before(async () => {
-    app = buildApp({ dbPath: ':memory:', sessionSecret: 'test-secret-that-is-at-least-32-characters-long' });
+    app = buildApp({ dbPath: ':memory:', sessionSecret: 'test-secret-that-is-at-least-32-characters-long', encryptionKey: 'a'.repeat(64), googleClientId: 'test-id', googleClientSecret: 'test-secret', googleRedirectUri: 'http://localhost:3000/admin/calendars/callback/google' });
     await app.ready();
 
     const hash = await bcrypt.hash('correct-password', 10);

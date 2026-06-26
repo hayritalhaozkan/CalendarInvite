@@ -44,6 +44,12 @@ function buildApp(opts = {}) {
   if (!sessionSecret) {
     throw new Error('SESSION_SECRET environment variable is required');
   }
+  if (!encryptionKey) {
+    throw new Error('TOKEN_ENCRYPTION_KEY environment variable is required');
+  }
+  if (!googleClientId || !googleClientSecret || !googleRedirectUri) {
+    throw new Error('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI environment variables are required');
+  }
   app.register(session, {
     secret: sessionSecret,
     cookie: { secure: false, httpOnly: true, sameSite: 'lax' },
@@ -152,18 +158,21 @@ function buildApp(opts = {}) {
     });
 
     app.get('/calendars/callback/google', async (request, reply) => {
-      const { code } = request.query;
+      const { code, error } = request.query;
+      if (!code || error) {
+        return reply.redirect('/admin/calendars?error=oauth_denied');
+      }
       try {
         const tokens = await exchangeCodeForTokens(code, googleClientId, googleClientSecret, googleRedirectUri);
         const email = await getGoogleUserEmail(tokens.access_token);
         const tokenExpiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
         const encryptedAccess = encrypt(tokens.access_token, encryptionKey);
-        const encryptedRefresh = encrypt(tokens.refresh_token, encryptionKey);
+        const encryptedRefresh = tokens.refresh_token ? encrypt(tokens.refresh_token, encryptionKey) : null;
 
         app.db.prepare(
           'INSERT INTO calendar_connections (provider, encrypted_access_token, encrypted_refresh_token, token_expiry, email, status) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run('google', encryptedAccess, encryptedRefresh, tokenExpiry, email, 'connected');
+        ).run('google', encryptedAccess, encryptedRefresh || '', tokenExpiry, email, 'connected');
 
         return reply.redirect('/admin/calendars');
       } catch (err) {
