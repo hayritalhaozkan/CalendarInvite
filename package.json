@@ -12,6 +12,7 @@
   "license": "UNLICENSED",
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
+    "@fastify/csrf-protection": "^8.0.0",
     "@fastify/formbody": "^8.0.0",
     "@fastify/session": "^11.0.0",
     "bcrypt": "^6.0.0",

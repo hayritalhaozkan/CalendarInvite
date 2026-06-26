@@ -2,6 +2,8 @@ const fastify = require('fastify');
 const formbody = require('@fastify/formbody');
 const cookie = require('@fastify/cookie');
 const session = require('@fastify/session');
+const csrf = require('@fastify/csrf-protection');
+const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
 
 function escapeHtml(str) {
@@ -40,6 +42,7 @@ function buildApp(opts = {}) {
     secret: sessionSecret,
     cookie: { secure: false, httpOnly: true, sameSite: 'lax' },
   });
+  app.register(csrf, { sessionPlugin: '@fastify/session' });
 
   app.get('/', async (request, reply) => {
     reply.type('text/html').send(BASE_LAYOUT('Home', `
@@ -50,14 +53,62 @@ function buildApp(opts = {}) {
 
   app.register(async function adminRoutes(app) {
     app.get('/login', async (request, reply) => {
+      const token = reply.generateCsrf();
       reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
         <h1>Admin Login</h1>
         <form method="POST" action="/admin/login">
+          <input type="hidden" name="_csrf" value="${token}">
           <label>Username <input type="text" name="username" required></label>
           <label>Password <input type="password" name="password" required></label>
           <button type="submit">Login</button>
         </form>
       `));
+    });
+
+    app.post('/login', { preHandler: app.csrfProtection }, async (request, reply) => {
+      const { username, password } = request.body || {};
+
+      const admin = app.db.prepare('SELECT * FROM admin WHERE username = ?').get(username);
+      if (!admin || !(await bcrypt.compare(password || '', admin.password_hash))) {
+        const token = reply.generateCsrf();
+        return reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
+          <h1>Admin Login</h1>
+          <p style="color: var(--pico-color-red-500);">Invalid username or password</p>
+          <form method="POST" action="/admin/login">
+            <input type="hidden" name="_csrf" value="${token}">
+            <label>Username <input type="text" name="username" required></label>
+            <label>Password <input type="password" name="password" required></label>
+            <button type="submit">Login</button>
+          </form>
+        `));
+      }
+
+      request.session.set('adminId', admin.id);
+      return reply.redirect('/admin/dashboard');
+    });
+
+    app.addHook('preHandler', async (request, reply) => {
+      if (request.url === '/admin/login') return;
+      if (!request.session.get('adminId')) {
+        return reply.redirect('/admin/login');
+      }
+    });
+
+    app.get('/dashboard', async (request, reply) => {
+      const token = reply.generateCsrf();
+      reply.type('text/html').send(BASE_LAYOUT('Dashboard', `
+        <h1>Dashboard</h1>
+        <p>Welcome to the admin panel.</p>
+        <form method="POST" action="/admin/logout">
+          <input type="hidden" name="_csrf" value="${token}">
+          <button type="submit">Logout</button>
+        </form>
+      `));
+    });
+
+    app.post('/logout', { preHandler: app.csrfProtection }, async (request, reply) => {
+      await request.session.destroy();
+      return reply.redirect('/admin/login');
     });
   }, { prefix: '/admin' });
 
