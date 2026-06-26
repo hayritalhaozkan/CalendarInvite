@@ -5,8 +5,7 @@ const session = require('@fastify/session');
 const csrf = require('@fastify/csrf-protection');
 const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
-const { encrypt, decrypt } = require('./encryption');
-const { getZohoClient } = require('./zoho');
+const { encrypt } = require('./encryption');
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
