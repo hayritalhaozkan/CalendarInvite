@@ -36,9 +36,13 @@ function buildApp(opts = {}) {
   const googleClientId = opts.googleClientId || process.env.GOOGLE_CLIENT_ID;
   const googleClientSecret = opts.googleClientSecret || process.env.GOOGLE_CLIENT_SECRET;
   const googleRedirectUri = opts.googleRedirectUri || process.env.GOOGLE_REDIRECT_URI;
+  const zohoClientId = opts.zohoClientId || process.env.ZOHO_CLIENT_ID;
+  const zohoClientSecret = opts.zohoClientSecret || process.env.ZOHO_CLIENT_SECRET;
+  const zohoRedirectUri = opts.zohoRedirectUri || process.env.ZOHO_REDIRECT_URI;
 
   app.decorate('db', db);
   app.decorate('fetchFn', opts.fetchFn || globalThis.fetch);
+  app.decorate('zohoFetch', null);
 
   app.register(formbody);
   app.register(cookie);
@@ -143,6 +147,7 @@ function buildApp(opts = {}) {
         <h1>Calendar Connections</h1>
         <a href="/admin/calendars/connect/google" role="button">Connect Google Calendar</a>
         <a href="/admin/calendars/connect/microsoft" role="button">Connect Office 365 Calendar</a>
+        <a href="/admin/calendars/connect/zoho" role="button">Connect Zoho Calendar</a>
         ${connections.length ? `
           <table>
             <thead><tr><th>Provider</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead>
@@ -254,6 +259,61 @@ function buildApp(opts = {}) {
         meData.mail || meData.userPrincipalName,
         'connected'
       );
+
+      return reply.redirect('/admin/calendars');
+    });
+
+    app.get('/calendars/connect/zoho', async (request, reply) => {
+      const params = new URLSearchParams({
+        client_id: zohoClientId,
+        redirect_uri: zohoRedirectUri,
+        response_type: 'code',
+        scope: 'ZohoCalendar.calendar.ALL,ZohoCalendar.event.ALL,ZohoCalendar.freebusy.READ',
+        access_type: 'offline',
+        prompt: 'consent',
+      });
+      return reply.redirect(`https://accounts.zoho.com/oauth/v2/auth?${params}`);
+    });
+
+    app.get('/calendars/zoho/callback', async (request, reply) => {
+      const { code } = request.query;
+      if (!code) {
+        return reply.status(400).send('Missing authorization code');
+      }
+
+      const fetchFn = app.zohoFetch || globalThis.fetch;
+
+      const tokenParams = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: zohoClientId,
+        client_secret: zohoClientSecret,
+        redirect_uri: zohoRedirectUri,
+        code,
+      });
+
+      const tokenResponse = await fetchFn(`https://accounts.zoho.com/oauth/v2/token?${tokenParams}`, {
+        method: 'POST',
+      });
+
+      if (!tokenResponse.ok) {
+        return reply.status(502).send('Failed to exchange code for tokens');
+      }
+
+      const tokenData = await tokenResponse.json();
+      const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+
+      const userResponse = await fetchFn('https://accounts.zoho.com/oauth/user/info', {
+        headers: { Authorization: `Zoho-oauthtoken ${tokenData.access_token}` },
+      });
+      const userData = await userResponse.json();
+      const email = userData.Email || '';
+
+      const encryptedAccess = encrypt(tokenData.access_token, encryptionKey);
+      const encryptedRefresh = encrypt(tokenData.refresh_token, encryptionKey);
+
+      app.db.prepare(
+        'INSERT INTO calendar_connections (provider, encrypted_access_token, encrypted_refresh_token, token_expiry, email, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run('zoho', encryptedAccess, encryptedRefresh, expiresAt, email, 'connected');
 
       return reply.redirect('/admin/calendars');
     });
