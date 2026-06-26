@@ -5,6 +5,7 @@ const session = require('@fastify/session');
 const csrf = require('@fastify/csrf-protection');
 const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
+const { registerProfileRoutes } = require('./profiles');
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -110,6 +111,8 @@ function buildApp(opts = {}) {
       await request.session.destroy();
       return reply.redirect('/admin/login');
     });
+
+    registerProfileRoutes(app);
   }, { prefix: '/admin' });
 
   app.register(async function publicRoutes(app) {
@@ -130,4 +133,4 @@ function buildApp(opts = {}) {
   return app;
 }
 
-module.exports = { buildApp };
+module.exports = { buildApp, BASE_LAYOUT };
