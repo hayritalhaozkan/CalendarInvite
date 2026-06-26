@@ -14,7 +14,7 @@ const TIMEZONES = [
   'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Amsterdam',
   'Europe/Madrid', 'Europe/Rome', 'Europe/Zurich', 'Europe/Moscow',
   'Europe/Istanbul', 'Europe/Warsaw', 'Europe/Athens',
-  'Asia/Istanbul', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Shanghai',
+  'Asia/Dubai', 'Asia/Kolkata', 'Asia/Shanghai',
   'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Asia/Hong_Kong',
   'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
   'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos',
