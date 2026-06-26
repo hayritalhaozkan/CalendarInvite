@@ -5,6 +5,8 @@ const session = require('@fastify/session');
 const csrf = require('@fastify/csrf-protection');
 const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
+const { encrypt, decrypt } = require('./encryption');
+const { getZohoClient } = require('./zoho');
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -29,8 +31,13 @@ function buildApp(opts = {}) {
   const app = fastify({ logger: opts.logger || false });
 
   const db = createDatabase(opts.dbPath || process.env.DB_PATH || './data/calendar-invite.db');
+  const encryptionKey = opts.encryptionKey || process.env.TOKEN_ENCRYPTION_KEY;
+  const zohoClientId = opts.zohoClientId || process.env.ZOHO_CLIENT_ID;
+  const zohoClientSecret = opts.zohoClientSecret || process.env.ZOHO_CLIENT_SECRET;
+  const zohoRedirectUri = opts.zohoRedirectUri || process.env.ZOHO_REDIRECT_URI;
 
   app.decorate('db', db);
+  app.decorate('zohoFetch', null);
 
   app.register(formbody);
   app.register(cookie);
@@ -109,6 +116,96 @@ function buildApp(opts = {}) {
     app.post('/logout', { preHandler: app.csrfProtection }, async (request, reply) => {
       await request.session.destroy();
       return reply.redirect('/admin/login');
+    });
+
+    app.get('/calendars', async (request, reply) => {
+      const connections = app.db.prepare('SELECT * FROM calendar_connections').all();
+      const token = reply.generateCsrf();
+      const connectionRows = connections.map(c => `
+        <tr>
+          <td>${escapeHtml(c.provider)}</td>
+          <td>${escapeHtml(c.email || '')}</td>
+          <td>${escapeHtml(c.status)}</td>
+          <td>
+            <form method="POST" action="/admin/calendars/${c.id}/disconnect" style="display:inline">
+              <input type="hidden" name="_csrf" value="${token}">
+              <button type="submit" class="secondary outline">Disconnect</button>
+            </form>
+          </td>
+        </tr>
+      `).join('');
+
+      reply.type('text/html').send(BASE_LAYOUT('Calendar Connections', `
+        <h1>Calendar Connections</h1>
+        ${connections.length > 0 ? `
+          <table>
+            <thead><tr><th>Provider</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>${connectionRows}</tbody>
+          </table>
+        ` : '<p>No calendars connected yet.</p>'}
+        <a href="/admin/calendars/connect/zoho" role="button">Connect Zoho Calendar</a>
+      `));
+    });
+
+    app.get('/calendars/connect/zoho', async (request, reply) => {
+      const params = new URLSearchParams({
+        client_id: zohoClientId,
+        redirect_uri: zohoRedirectUri,
+        response_type: 'code',
+        scope: 'ZohoCalendar.calendar.ALL,ZohoCalendar.event.ALL,ZohoCalendar.freebusy.READ',
+        access_type: 'offline',
+        prompt: 'consent',
+      });
+      return reply.redirect(`https://accounts.zoho.com/oauth/v2/auth?${params}`);
+    });
+
+    app.get('/calendars/zoho/callback', async (request, reply) => {
+      const { code } = request.query;
+      if (!code) {
+        return reply.status(400).send('Missing authorization code');
+      }
+
+      const fetchFn = app.zohoFetch || globalThis.fetch;
+
+      const tokenParams = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: zohoClientId,
+        client_secret: zohoClientSecret,
+        redirect_uri: zohoRedirectUri,
+        code,
+      });
+
+      const tokenResponse = await fetchFn(`https://accounts.zoho.com/oauth/v2/token?${tokenParams}`, {
+        method: 'POST',
+      });
+
+      if (!tokenResponse.ok) {
+        return reply.status(502).send('Failed to exchange code for tokens');
+      }
+
+      const tokenData = await tokenResponse.json();
+      const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+
+      const userResponse = await fetchFn('https://accounts.zoho.com/oauth/user/info', {
+        headers: { Authorization: `Zoho-oauthtoken ${tokenData.access_token}` },
+      });
+      const userData = await userResponse.json();
+      const email = userData.Email || '';
+
+      const encryptedAccess = encrypt(tokenData.access_token, encryptionKey);
+      const encryptedRefresh = encrypt(tokenData.refresh_token, encryptionKey);
+
+      app.db.prepare(
+        'INSERT INTO calendar_connections (provider, encrypted_access_token, encrypted_refresh_token, token_expiry, email, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run('zoho', encryptedAccess, encryptedRefresh, expiresAt, email, 'connected');
+
+      return reply.redirect('/admin/calendars');
+    });
+
+    app.post('/calendars/:id/disconnect', { preHandler: app.csrfProtection }, async (request, reply) => {
+      const { id } = request.params;
+      app.db.prepare('DELETE FROM calendar_connections WHERE id = ?').run(id);
+      return reply.redirect('/admin/calendars');
     });
   }, { prefix: '/admin' });
 
