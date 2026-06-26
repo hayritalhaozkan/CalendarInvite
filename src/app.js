@@ -49,9 +49,6 @@ function buildApp(opts = {}) {
   if (!encryptionKey) {
     throw new Error('TOKEN_ENCRYPTION_KEY environment variable is required');
   }
-  if (!googleClientId || !googleClientSecret || !googleRedirectUri) {
-    throw new Error('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI environment variables are required');
-  }
   app.register(session, {
     secret: sessionSecret,
     cookie: { secure: false, httpOnly: true, sameSite: 'lax' },
@@ -156,6 +153,9 @@ function buildApp(opts = {}) {
     });
 
     app.get('/calendars/connect/google', async (request, reply) => {
+      if (!googleClientId || !googleClientSecret || !googleRedirectUri) {
+        return reply.status(500).send('Google OAuth2 is not configured');
+      }
       const url = buildGoogleAuthUrl(googleClientId, googleRedirectUri);
       return reply.redirect(url);
     });
