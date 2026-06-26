@@ -1,0 +1,25 @@
+{
+  "name": "calendar-invite",
+  "version": "0.0.1",
+  "description": "Self-hosted booking tool for managing and publishing available calendar slots",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/**/*.test.js",
+    "seed": "node scripts/seed.js"
+  },
+  "keywords": [],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@fastify/cookie": "^11.0.0",
+    "@fastify/formbody": "^8.0.0",
+    "@fastify/session": "^11.0.0",
+    "bcrypt": "^6.0.0",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
