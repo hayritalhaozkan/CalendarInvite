@@ -128,14 +128,189 @@ function buildApp(opts = {}) {
 
     app.get('/dashboard', async (request, reply) => {
       const token = reply.generateCsrf();
+      const adminId = request.session.get('adminId');
+      const admin = app.db.prepare('SELECT timezone FROM admin WHERE id = ?').get(adminId);
+      const adminTz = admin ? admin.timezone : 'UTC';
+
+      const activeProfiles = app.db.prepare("SELECT COUNT(*) as count FROM booking_profiles WHERE is_active = 1").get().count;
+      const now = new Date().toISOString();
+      const upcomingCount = app.db.prepare("SELECT COUNT(*) as count FROM bookings WHERE status = 'confirmed' AND start_time > ?").get(now).count;
+      const next5 = app.db.prepare(
+        "SELECT b.*, bp.name as profile_name FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id WHERE b.status = 'confirmed' AND b.start_time > ? ORDER BY b.start_time ASC LIMIT 5"
+      ).all(now);
+
+      const next5Rows = next5.map(b => {
+        const start = new Date(b.start_time);
+        const dateStr = start.toLocaleString('en-US', { timeZone: adminTz, dateStyle: 'medium', timeStyle: 'short' });
+        return `<tr><td>${escapeHtml(dateStr)}</td><td>${escapeHtml(b.title)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.profile_name)}</td></tr>`;
+      }).join('');
+
       reply.type('text/html').send(BASE_LAYOUT('Dashboard', `
         <h1>Dashboard</h1>
-        <p>Welcome to the admin panel.</p>
+        <nav>
+          <a href="/admin/dashboard">Dashboard</a> |
+          <a href="/admin/bookings">Bookings</a> |
+          <a href="/admin/profiles">Profiles</a> |
+          <a href="/admin/calendars">Calendars</a> |
+          <a href="/admin/settings">Settings</a>
+        </nav>
+        <div class="grid">
+          <article><h3>Active Profiles</h3><p><strong>${activeProfiles}</strong></p></article>
+          <article><h3>Upcoming Bookings</h3><p><strong>${upcomingCount}</strong></p></article>
+        </div>
+        ${next5.length ? `
+          <h2>Next Upcoming Bookings</h2>
+          <table>
+            <thead><tr><th>Date/Time</th><th>Title</th><th>Booker</th><th>Profile</th></tr></thead>
+            <tbody>${next5Rows}</tbody>
+          </table>
+        ` : '<p>No upcoming bookings.</p>'}
         <form method="POST" action="/admin/logout">
           <input type="hidden" name="_csrf" value="${token}">
-          <button type="submit">Logout</button>
+          <button type="submit" class="secondary">Logout</button>
         </form>
       `));
+    });
+
+    app.get('/bookings', async (request, reply) => {
+      const token = reply.generateCsrf();
+      const adminId = request.session.get('adminId');
+      const admin = app.db.prepare('SELECT timezone FROM admin WHERE id = ?').get(adminId);
+      const adminTz = admin ? admin.timezone : 'UTC';
+
+      const { status, profile_id, page } = request.query;
+      const currentPage = parseInt(page, 10) || 1;
+      const perPage = 20;
+      const offset = (currentPage - 1) * perPage;
+
+      let where = [];
+      let params = [];
+      if (status && (status === 'confirmed' || status === 'cancelled')) {
+        where.push('b.status = ?');
+        params.push(status);
+      }
+      if (profile_id) {
+        where.push('b.profile_id = ?');
+        params.push(parseInt(profile_id, 10));
+      }
+
+      const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
+      const now = new Date().toISOString();
+
+      const countResult = app.db.prepare(`SELECT COUNT(*) as count FROM bookings b ${whereClause}`).get(...params);
+      const totalPages = Math.ceil(countResult.count / perPage);
+
+      const bookings = app.db.prepare(
+        `SELECT b.*, bp.name as profile_name FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id ${whereClause} ORDER BY CASE WHEN b.start_time > ? THEN 0 ELSE 1 END, b.start_time ASC LIMIT ? OFFSET ?`
+      ).all(...params, now, perPage, offset);
+
+      const profiles = app.db.prepare("SELECT id, name FROM booking_profiles ORDER BY name").all();
+      const profileOptions = profiles.map(p =>
+        `<option value="${p.id}"${profile_id && parseInt(profile_id) === p.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`
+      ).join('');
+
+      const rows = bookings.map(b => {
+        const start = new Date(b.start_time);
+        const dateStr = start.toLocaleString('en-US', { timeZone: adminTz, dateStyle: 'medium', timeStyle: 'short' });
+        const statusBadge = b.status === 'cancelled'
+          ? '<span class="badge" style="background:var(--pico-color-red-500);color:white;padding:2px 8px;border-radius:4px">cancelled</span>'
+          : '<span class="badge" style="background:var(--pico-color-green-500);color:white;padding:2px 8px;border-radius:4px">confirmed</span>';
+        const cancelBtn = b.status === 'confirmed'
+          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="secondary outline" style="padding:4px 8px;margin:0">Cancel</button></form>`
+          : '';
+        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes}</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td>${cancelBtn}</td></tr>`;
+      }).join('');
+
+      const pagination = totalPages > 1 ? `<nav><ul>${Array.from({length: totalPages}, (_, i) => {
+        const p = i + 1;
+        const qs = new URLSearchParams();
+        if (status) qs.set('status', status);
+        if (profile_id) qs.set('profile_id', profile_id);
+        qs.set('page', p);
+        return `<li><a href="/admin/bookings?${qs}"${p === currentPage ? ' aria-current="page"' : ''}>${p}</a></li>`;
+      }).join('')}</ul></nav>` : '';
+
+      reply.type('text/html').send(BASE_LAYOUT('Bookings', `
+        <h1>Bookings</h1>
+        <nav>
+          <a href="/admin/dashboard">Dashboard</a> |
+          <a href="/admin/bookings">Bookings</a> |
+          <a href="/admin/profiles">Profiles</a> |
+          <a href="/admin/calendars">Calendars</a> |
+          <a href="/admin/settings">Settings</a>
+        </nav>
+        <form method="GET" action="/admin/bookings" role="group">
+          <select name="status">
+            <option value="">All Statuses</option>
+            <option value="confirmed"${status === 'confirmed' ? ' selected' : ''}>Confirmed</option>
+            <option value="cancelled"${status === 'cancelled' ? ' selected' : ''}>Cancelled</option>
+          </select>
+          <select name="profile_id">
+            <option value="">All Profiles</option>
+            ${profileOptions}
+          </select>
+          <button type="submit">Filter</button>
+        </form>
+        <table>
+          <thead><tr><th>Date/Time</th><th>Duration</th><th>Profile</th><th>Booker</th><th>Email</th><th>Title</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${pagination}
+      `));
+    });
+
+    app.post('/bookings/:id/cancel', { preHandler: app.csrfProtection }, async (request, reply) => {
+      const { id } = request.params;
+      const booking = app.db.prepare("SELECT b.*, bp.write_calendar_id FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id WHERE b.id = ?").get(id);
+
+      if (!booking) {
+        return reply.code(404).type('text/html').send(BASE_LAYOUT('Not Found', '<h1>Booking not found</h1>'));
+      }
+
+      if (booking.status === 'cancelled') {
+        return reply.code(400).type('text/html').send(BASE_LAYOUT('Error', '<h1>Booking already cancelled</h1>'));
+      }
+
+      if (booking.calendar_event_id && booking.write_calendar_id) {
+        const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
+        if (connection) {
+          try {
+            let accessToken;
+            try {
+              accessToken = decrypt(connection.encrypted_access_token, encryptionKey);
+            } catch {
+              accessToken = connection.encrypted_access_token;
+            }
+
+            if (connection.provider === 'google') {
+              await app.fetchFn(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${booking.calendar_event_id}?sendUpdates=all`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${accessToken}` },
+              });
+            } else if (connection.provider === 'microsoft') {
+              await app.fetchFn(`https://graph.microsoft.com/v1.0/me/events/${booking.calendar_event_id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${accessToken}` },
+              });
+            } else if (connection.provider === 'zoho') {
+              const calendarsResponse = await app.fetchFn('https://calendar.zoho.com/api/v1/calendars', {
+                headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+              });
+              const calendarsData = await calendarsResponse.json();
+              const primaryCalendar = calendarsData.calendars.find(c => c.isprimary) || calendarsData.calendars[0];
+              await app.fetchFn(`https://calendar.zoho.com/api/v1/calendars/${primaryCalendar.uid}/events/${booking.calendar_event_id}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+              });
+            }
+          } catch {
+            // Log but continue with cancellation
+          }
+        }
+      }
+
+      app.db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(id);
+      return reply.redirect('/admin/bookings');
     });
 
     app.post('/logout', { preHandler: app.csrfProtection }, async (request, reply) => {
