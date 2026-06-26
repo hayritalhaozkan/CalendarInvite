@@ -77,6 +77,17 @@ function initializeSchema(db) {
       calendar_event_id TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('ip', 'email')),
+      endpoint TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rate_limits_key_type ON rate_limits(key, type);
+    CREATE INDEX IF NOT EXISTS idx_rate_limits_timestamp ON rate_limits(timestamp);
   `);
 }
 
