@@ -585,4 +585,110 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
   });
 }
 
-module.exports = { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi, computeSlots, removeConflicts, getCalendarBusySlots, getExistingBookings, VALID_DURATIONS };
+async function deleteCalendarEvent(fetchFn, db, encryptionKey, connection, calendarEventId) {
+  let accessToken;
+  try {
+    accessToken = decrypt(connection.encrypted_access_token, encryptionKey);
+  } catch {
+    accessToken = connection.encrypted_access_token;
+  }
+
+  if (connection.provider === 'google') {
+    await fetchFn(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${calendarEventId}?sendUpdates=all`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } else if (connection.provider === 'microsoft') {
+    await fetchFn(`https://graph.microsoft.com/v1.0/me/events/${calendarEventId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } else if (connection.provider === 'zoho') {
+    const calendarsResponse = await fetchFn('https://calendar.zoho.com/api/v1/calendars', {
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+    });
+    const calendarsData = await calendarsResponse.json();
+    const primaryCalendar = calendarsData.calendars.find(c => c.isprimary) || calendarsData.calendars[0];
+    await fetchFn(`https://calendar.zoho.com/api/v1/calendars/${primaryCalendar.uid}/events/${calendarEventId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+    });
+  }
+}
+
+function registerCancellationPage(app, { encryptionKey, baseLayout }) {
+  app.get('/:token', async (request, reply) => {
+    const { token } = request.params;
+    const booking = app.db.prepare("SELECT b.*, bp.name as profile_name FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id WHERE b.cancellation_token = ?").get(token);
+
+    if (!booking) {
+      return reply.code(404).type('text/html').send(baseLayout('Not Found', '<h1>Booking not found</h1>'));
+    }
+
+    if (booking.status === 'cancelled') {
+      return reply.type('text/html').send(baseLayout('Already Cancelled', `
+        <h1>Booking Already Cancelled</h1>
+        <p>This booking has already been cancelled.</p>
+      `));
+    }
+
+    const startDate = new Date(booking.start_time);
+    const endDate = new Date(booking.end_time);
+    const dateStr = startDate.toISOString().split('T')[0];
+    const startTime = startDate.toISOString().split('T')[1].slice(0, 5);
+    const endTime = endDate.toISOString().split('T')[1].slice(0, 5);
+    const attendees = [booking.booker_email];
+    if (booking.additional_attendees) {
+      try { attendees.push(...JSON.parse(booking.additional_attendees)); } catch {}
+    }
+
+    reply.type('text/html').send(baseLayout('Cancel Booking', `
+      <h1>Cancel Booking</h1>
+      <p>Are you sure you want to cancel this booking?</p>
+      <article>
+        <header><strong>${escapeHtml(booking.title)}</strong></header>
+        <p>Date: ${escapeHtml(dateStr)}</p>
+        <p>Time: ${escapeHtml(startTime)} - ${escapeHtml(endTime)} UTC</p>
+        <p>Attendees: ${attendees.map(e => escapeHtml(e)).join(', ')}</p>
+      </article>
+      <form method="POST" action="/api/cancel/${escapeHtml(token)}">
+        <button type="submit" class="contrast">Confirm Cancellation</button>
+      </form>
+      <a href="/" role="button" class="outline">Keep Booking</a>
+    `));
+  });
+}
+
+function registerCancellationApi(app, { encryptionKey }) {
+  app.post('/:token', async (request, reply) => {
+    const { token } = request.params;
+    const booking = app.db.prepare("SELECT b.*, bp.write_calendar_id FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id WHERE b.cancellation_token = ?").get(token);
+
+    if (!booking) {
+      return reply.code(404).send({ error: 'Booking not found' });
+    }
+
+    if (booking.status === 'cancelled') {
+      return reply.code(400).send({ error: 'This booking has already been cancelled' });
+    }
+
+    // Attempt to delete calendar event
+    if (booking.calendar_event_id && booking.write_calendar_id) {
+      const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
+      if (connection) {
+        try {
+          await deleteCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, booking.calendar_event_id);
+        } catch {
+          // If calendar API fails, still proceed with local cancellation
+        }
+      }
+    }
+
+    // Mark as cancelled in DB
+    app.db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(booking.id);
+
+    return { message: 'Booking successfully cancelled' };
+  });
+}
+
+module.exports = { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi, registerCancellationPage, registerCancellationApi, computeSlots, removeConflicts, getCalendarBusySlots, getExistingBookings, VALID_DURATIONS };

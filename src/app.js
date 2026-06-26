@@ -9,7 +9,7 @@ const { createDatabase } = require('./db');
 const { buildGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserEmail } = require('./google');
 const { encrypt, decrypt } = require('./encryption');
 const { registerProfileRoutes } = require('./profiles');
-const { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi } = require('./booking');
+const { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi, registerCancellationPage, registerCancellationApi } = require('./booking');
 
 const TIMEZONES = [
   'UTC',
@@ -424,6 +424,14 @@ function buildApp(opts = {}) {
     registerSlotsApi(app, { encryptionKey });
     registerBookingSubmitApi(app, { encryptionKey });
   }, { prefix: '/api/book' });
+
+  app.register(async function cancelPage(app) {
+    registerCancellationPage(app, { encryptionKey, baseLayout: BASE_LAYOUT });
+  }, { prefix: '/cancel' });
+
+  app.register(async function cancelApi(app) {
+    registerCancellationApi(app, { encryptionKey });
+  }, { prefix: '/api/cancel' });
 
   app.addHook('onClose', () => {
     db.close();
