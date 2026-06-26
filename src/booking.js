@@ -1,8 +1,10 @@
+const crypto = require('node:crypto');
 const { decrypt } = require('./encryption');
 
 const VALID_DURATIONS = [30, 45, 60];
 const LEAD_TIME_MS = 2 * 60 * 60 * 1000;
 const HORIZON_MS = 4 * 7 * 24 * 60 * 60 * 1000;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -206,12 +208,29 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
           <h2>Available Times</h2>
           <div id="time-slots"></div>
         </section>
+        <section id="form-step" style="display:none">
+          <h2>Your Details</h2>
+          <div id="booking-error" style="display:none;color:var(--pico-color-red-500)"></div>
+          <form id="booking-form">
+            <label>Name (required) <input type="text" name="name" required></label>
+            <label>Email (required) <input type="email" name="email" required></label>
+            <label>Additional Attendees (comma-separated emails) <input type="text" name="additional_attendees"></label>
+            <label>Title <input type="text" name="title" placeholder="Meeting with [Your Name]"></label>
+            <label>Description <textarea name="description"></textarea></label>
+            <button type="submit">Confirm Booking</button>
+          </form>
+        </section>
+        <section id="confirmation-step" style="display:none">
+          <h2>Booking Confirmed</h2>
+          <div id="confirmation-details"></div>
+        </section>
       </div>
       <script>
         (function() {
           const slug = '${escapeHtml(slug)}';
           const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
           let selectedDuration = null;
+          let selectedSlotStart = null;
 
           document.querySelectorAll('.duration-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
@@ -243,6 +262,7 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
 
           function loadSlots(dateStr) {
             document.getElementById('slots-step').style.display = '';
+            document.getElementById('form-step').style.display = 'none';
             var container = document.getElementById('time-slots');
             container.innerHTML = '<p>Loading...</p>';
             fetch('/api/book/' + slug + '/slots?date=' + dateStr + '&duration=' + selectedDuration + '&timezone=' + tz)
@@ -254,10 +274,63 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
                 }
                 container.innerHTML = data.slots.map(function(s) {
                   var t = new Date(s.start).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: tz });
-                  return '<button class="slot-btn outline">' + t + '</button>';
+                  return '<button class="slot-btn outline" data-start="' + s.start + '">' + t + '</button>';
                 }).join('');
+                container.querySelectorAll('.slot-btn').forEach(function(btn) {
+                  btn.addEventListener('click', function() {
+                    selectedSlotStart = btn.dataset.start;
+                    document.getElementById('form-step').style.display = '';
+                    document.getElementById('booking-error').style.display = 'none';
+                  });
+                });
               });
           }
+
+          document.getElementById('booking-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var form = e.target;
+            var errDiv = document.getElementById('booking-error');
+            errDiv.style.display = 'none';
+
+            var attendeesRaw = form.additional_attendees.value.trim();
+            var additionalAttendees = attendeesRaw ? attendeesRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+
+            var payload = {
+              name: form.name.value.trim(),
+              email: form.email.value.trim(),
+              additional_attendees: additionalAttendees,
+              title: form.title.value.trim() || undefined,
+              description: form.description.value.trim() || undefined,
+              start_time: selectedSlotStart,
+              duration: selectedDuration,
+              timezone: tz
+            };
+
+            fetch('/api/book/' + slug, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            })
+            .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+            .then(function(result) {
+              if (!result.ok) {
+                errDiv.textContent = result.data.error || 'Something went wrong';
+                errDiv.style.display = '';
+                return;
+              }
+              var b = result.data.booking;
+              document.getElementById('booking-widget').querySelectorAll('section').forEach(function(s) { s.style.display = 'none'; });
+              var conf = document.getElementById('confirmation-step');
+              conf.style.display = '';
+              var startLocal = new Date(b.start_time).toLocaleString(undefined, { timeZone: tz, dateStyle: 'full', timeStyle: 'short' });
+              var endLocal = new Date(b.end_time).toLocaleTimeString(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit' });
+              var details = '<p><strong>' + b.title + '</strong></p>';
+              details += '<p>' + startLocal + ' - ' + endLocal + ' (' + b.duration_minutes + ' min)</p>';
+              if (b.meeting_link) details += '<p>Meeting link: <a href="' + b.meeting_link + '">' + b.meeting_link + '</a></p>';
+              details += '<p>Attendees: ' + b.attendees.join(', ') + '</p>';
+              document.getElementById('confirmation-details').innerHTML = details;
+            });
+          });
         })();
       </script>
     `));
@@ -300,4 +373,206 @@ function registerSlotsApi(app, { encryptionKey }) {
   });
 }
 
-module.exports = { registerBookingRoutes, registerSlotsApi, computeSlots, removeConflicts, getCalendarBusySlots, getExistingBookings, VALID_DURATIONS };
+async function createCalendarEvent(fetchFn, db, encryptionKey, connection, eventData) {
+  let accessToken;
+  try {
+    accessToken = decrypt(connection.encrypted_access_token, encryptionKey);
+  } catch {
+    accessToken = connection.encrypted_access_token;
+  }
+
+  if (connection.provider === 'google') {
+    const event = {
+      summary: eventData.title,
+      description: eventData.description || '',
+      start: { dateTime: eventData.start },
+      end: { dateTime: eventData.end },
+      attendees: eventData.attendees.map(email => ({ email })),
+    };
+    const response = await fetchFn('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+    });
+    if (!response.ok) throw new Error('Google event creation failed');
+    const data = await response.json();
+    return data.id;
+  } else if (connection.provider === 'microsoft') {
+    const body = {
+      subject: eventData.title,
+      start: { dateTime: eventData.start, timeZone: 'UTC' },
+      end: { dateTime: eventData.end, timeZone: 'UTC' },
+      attendees: eventData.attendees.map(email => ({ emailAddress: { address: email }, type: 'required' })),
+      body: { contentType: 'Text', content: eventData.description || '' },
+    };
+    const response = await fetchFn('https://graph.microsoft.com/v1.0/me/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error('Microsoft event creation failed');
+    const data = await response.json();
+    return data.id;
+  } else if (connection.provider === 'zoho') {
+    const calendarsResponse = await fetchFn('https://calendar.zoho.com/api/v1/calendars', {
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+    });
+    const calendarsData = await calendarsResponse.json();
+    const primaryCalendar = calendarsData.calendars.find(c => c.isprimary) || calendarsData.calendars[0];
+    const calendarUid = primaryCalendar.uid;
+
+    const pad = n => String(n).padStart(2, '0');
+    const formatZoho = (isoStr) => {
+      const d = new Date(isoStr);
+      return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}+0000`;
+    };
+
+    const zohoBody = {
+      eventdata: {
+        title: eventData.title,
+        description: eventData.description || '',
+        start: formatZoho(eventData.start),
+        end: formatZoho(eventData.end),
+        attendees: eventData.attendees.map(email => ({ email })),
+      },
+    };
+    const response = await fetchFn(`https://calendar.zoho.com/api/v1/calendars/${calendarUid}/events`, {
+      method: 'POST',
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(zohoBody),
+    });
+    if (!response.ok) throw new Error('Zoho event creation failed');
+    const result = await response.json();
+    return result.events[0].uid;
+  }
+
+  throw new Error(`Unsupported provider: ${connection.provider}`);
+}
+
+function registerBookingSubmitApi(app, { encryptionKey }) {
+  app.post('/:slug', async (request, reply) => {
+    const { slug } = request.params;
+    const body = request.body || {};
+
+    const { name, email, additional_attendees, title, description, start_time, duration, timezone } = body;
+
+    if (!name || !name.trim()) {
+      return reply.code(400).send({ error: 'name is required' });
+    }
+    if (!email || !email.trim()) {
+      return reply.code(400).send({ error: 'email is required' });
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      return reply.code(400).send({ error: 'invalid email format' });
+    }
+
+    const durationMinutes = parseInt(duration, 10);
+    if (!VALID_DURATIONS.includes(durationMinutes)) {
+      return reply.code(400).send({ error: 'duration must be 30, 45, or 60' });
+    }
+
+    if (!start_time) {
+      return reply.code(400).send({ error: 'start_time is required' });
+    }
+
+    const profile = app.db.prepare("SELECT * FROM booking_profiles WHERE slug = ?").get(slug);
+    if (!profile) {
+      return reply.code(404).send({ error: 'profile not found' });
+    }
+
+    if (!profile.is_active) {
+      return reply.code(400).send({ error: 'This profile is not currently accepting bookings' });
+    }
+
+    const startDate = new Date(start_time);
+    const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+    const dateStr = start_time.split('T')[0];
+
+    // Re-validate availability
+    const now = new Date();
+    let slots = computeSlots(app.db, profile.id, dateStr, durationMinutes, now);
+
+    const existingBookings = getExistingBookings(app.db, profile.id, dateStr);
+    if (existingBookings.length > 0) {
+      slots = removeConflicts(slots, existingBookings);
+    }
+
+    const busySlots = await getCalendarBusySlots(app.db, encryptionKey, profile.id, dateStr, app.fetchFn);
+    if (busySlots.length > 0) {
+      slots = removeConflicts(slots, busySlots);
+    }
+
+    const slotAvailable = slots.some(s => s.start === startDate.toISOString());
+    if (!slotAvailable) {
+      return reply.code(409).send({ error: 'This slot is no longer available, please pick another' });
+    }
+
+    // Gather attendees
+    const defaultAttendees = app.db.prepare("SELECT email FROM default_attendees WHERE profile_id = ?").all(profile.id).map(a => a.email);
+    const allAttendees = [...new Set([email, ...defaultAttendees, ...(additional_attendees || [])])];
+
+    const bookingTitle = title && title.trim() ? title.trim() : `Meeting with ${name.trim()}`;
+    const bookingDescription = description || '';
+    const cancellationToken = crypto.randomUUID();
+
+    // Build event description with cancellation link and meeting link
+    let eventDescription = bookingDescription;
+    if (profile.meeting_link_url) {
+      eventDescription += (eventDescription ? '\n\n' : '') + `Meeting link: ${profile.meeting_link_url}`;
+    }
+    eventDescription += (eventDescription ? '\n\n' : '') + `Cancel this booking: /cancel/${cancellationToken}`;
+
+    // Create calendar event if write calendar is configured
+    let calendarEventId = null;
+    if (profile.write_calendar_id) {
+      const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(profile.write_calendar_id);
+      if (connection) {
+        calendarEventId = await createCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, {
+          title: bookingTitle,
+          description: eventDescription,
+          start: startDate.toISOString(),
+          end: endDate.toISOString(),
+          attendees: allAttendees,
+        });
+      }
+    }
+
+    // Store booking
+    app.db.prepare(
+      "INSERT INTO bookings (profile_id, booker_name, booker_email, additional_attendees, title, description, start_time, end_time, duration_minutes, cancellation_token, status, calendar_event_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      profile.id,
+      name.trim(),
+      email.trim(),
+      additional_attendees ? JSON.stringify(additional_attendees) : null,
+      bookingTitle,
+      bookingDescription,
+      startDate.toISOString(),
+      endDate.toISOString(),
+      durationMinutes,
+      cancellationToken,
+      'confirmed',
+      calendarEventId,
+      new Date().toISOString()
+    );
+
+    return {
+      booking: {
+        title: bookingTitle,
+        description: bookingDescription || undefined,
+        start_time: startDate.toISOString(),
+        end_time: endDate.toISOString(),
+        duration_minutes: durationMinutes,
+        booker_name: name.trim(),
+        booker_email: email.trim(),
+        additional_attendees: additional_attendees || [],
+        cancellation_token: cancellationToken,
+        calendar_event_id: calendarEventId,
+        meeting_link: profile.meeting_link_url || undefined,
+        attendees: allAttendees,
+      },
+    };
+  });
+}
+
+module.exports = { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi, computeSlots, removeConflicts, getCalendarBusySlots, getExistingBookings, VALID_DURATIONS };
