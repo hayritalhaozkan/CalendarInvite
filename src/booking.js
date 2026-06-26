@@ -6,6 +6,11 @@ const LEAD_TIME_MS = 2 * 60 * 60 * 1000;
 const HORIZON_MS = 4 * 7 * 24 * 60 * 60 * 1000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const IP_RATE_LIMIT = 20;
+const IP_RATE_WINDOW_MS = 60 * 1000;
+const EMAIL_RATE_LIMIT = 5;
+const EMAIL_RATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 function escapeHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -171,6 +176,43 @@ function getExistingBookings(db, profileId, dateStr) {
   return db.prepare(
     "SELECT start_time as start, end_time as end FROM bookings WHERE profile_id = ? AND status = 'confirmed' AND start_time >= ? AND end_time <= ?"
   ).all(profileId, dayStart, dayEnd);
+}
+
+function cleanupOldRateLimits(db) {
+  const cutoff = new Date(Date.now() - EMAIL_RATE_WINDOW_MS).toISOString();
+  db.prepare("DELETE FROM rate_limits WHERE timestamp < ?").run(cutoff);
+}
+
+function checkIpRateLimit(db, ip) {
+  const windowStart = new Date(Date.now() - IP_RATE_WINDOW_MS).toISOString();
+  const count = db.prepare(
+    "SELECT COUNT(*) as cnt FROM rate_limits WHERE key = ? AND type = 'ip' AND timestamp > ?"
+  ).get(ip, windowStart).cnt;
+  return count >= IP_RATE_LIMIT;
+}
+
+function recordIpRequest(db, ip, endpoint) {
+  db.prepare(
+    "INSERT INTO rate_limits (key, type, endpoint, timestamp) VALUES (?, 'ip', ?, ?)"
+  ).run(ip, endpoint, new Date().toISOString());
+}
+
+function checkEmailRateLimit(db, email) {
+  const windowStart = new Date(Date.now() - EMAIL_RATE_WINDOW_MS).toISOString();
+  const count = db.prepare(
+    "SELECT COUNT(*) as cnt FROM rate_limits WHERE key = ? AND type = 'email' AND timestamp > ?"
+  ).get(email, windowStart).cnt;
+  return count >= EMAIL_RATE_LIMIT;
+}
+
+function recordEmailBooking(db, email, endpoint) {
+  db.prepare(
+    "INSERT INTO rate_limits (key, type, endpoint, timestamp) VALUES (?, 'email', ?, ?)"
+  ).run(email, endpoint, new Date().toISOString());
+}
+
+function getClientIp(request) {
+  return request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || '127.0.0.1';
 }
 
 function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
@@ -339,6 +381,17 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
   });
 }
 
+function registerRateLimitHook(app) {
+  app.addHook('onRequest', async (request, reply) => {
+    cleanupOldRateLimits(app.db);
+    const ip = getClientIp(request);
+    if (checkIpRateLimit(app.db, ip)) {
+      return reply.code(429).send({ error: 'Too many requests, please try again later' });
+    }
+    recordIpRequest(app.db, ip, request.url);
+  });
+}
+
 function registerSlotsApi(app, { encryptionKey }) {
   app.get('/:slug/slots', async (request, reply) => {
     const { slug } = request.params;
@@ -494,6 +547,10 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
       return reply.code(400).send({ error: 'This profile is not currently accepting bookings' });
     }
 
+    if (checkEmailRateLimit(app.db, email.trim())) {
+      return reply.code(429).send({ error: 'Too many bookings, please try again later' });
+    }
+
     const startDate = new Date(start_time);
     const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
     const dateStr = start_time.split('T')[0];
@@ -566,6 +623,8 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
       new Date().toISOString()
     );
 
+    recordEmailBooking(app.db, email.trim(), request.url);
+
     return {
       booking: {
         title: bookingTitle,
@@ -585,4 +644,4 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
   });
 }
 
-module.exports = { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi, computeSlots, removeConflicts, getCalendarBusySlots, getExistingBookings, VALID_DURATIONS };
+module.exports = { registerBookingRoutes, registerSlotsApi, registerBookingSubmitApi, registerRateLimitHook, computeSlots, removeConflicts, getCalendarBusySlots, getExistingBookings, VALID_DURATIONS };
