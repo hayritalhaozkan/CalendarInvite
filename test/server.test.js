@@ -28,7 +28,9 @@ describe('Server', () => {
   });
 
   it('registers public booking route group', async () => {
+    app.db.prepare("INSERT INTO booking_profiles (slug, name, is_active, created_at) VALUES (?, ?, ?, ?)").run('test-slug', 'Test', 1, new Date().toISOString());
     const response = await app.inject({ method: 'GET', url: '/book/test-slug' });
     assert.notEqual(response.statusCode, 404);
+    app.db.prepare("DELETE FROM booking_profiles WHERE slug = ?").run('test-slug');
   });
 });
