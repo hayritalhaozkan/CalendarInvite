@@ -59,13 +59,14 @@ describe('Admin Auth', () => {
       assert.ok(response.body.includes('Invalid username or password'));
     });
 
-    it('rejects request without CSRF token', async () => {
+    it('redirects to login when CSRF token is missing', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/admin/login',
         payload: { username: 'admin', password: 'correct-password' },
       });
-      assert.equal(response.statusCode, 403);
+      assert.equal(response.statusCode, 302);
+      assert.equal(response.headers.location, '/admin/login');
     });
   });
 

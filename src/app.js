@@ -84,6 +84,13 @@ function buildApp(opts = {}) {
   });
 
   app.register(async function adminRoutes(app) {
+    app.setErrorHandler(async (error, request, reply) => {
+      if ((error.code === 'FST_CSRF_MISSING_SECRET' || error.code === 'FST_CSRF_INVALID_TOKEN') && request.url === '/admin/login') {
+        return reply.redirect('/admin/login');
+      }
+      reply.code(error.statusCode || 500).send({ statusCode: error.statusCode || 500, error: error.name, message: error.message });
+    });
+
     app.get('/login', async (request, reply) => {
       const token = reply.generateCsrf();
       reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
@@ -335,11 +342,36 @@ function buildApp(opts = {}) {
         </tr>
       `).join('');
 
+      const googleConfigured = !!(googleClientId && googleClientSecret && googleRedirectUri);
+      const msClientId = opts.microsoftClientId || process.env.MICROSOFT_CLIENT_ID;
+      const msConfigured = !!msClientId;
+      const zohoConfigured = !!(zohoClientId && zohoClientSecret && zohoRedirectUri);
+
+      const connectBtn = (href, label, configured) => configured
+        ? `<a href="${href}" role="button">${label}</a>`
+        : `<a role="button" class="secondary" aria-disabled="true" style="pointer-events:none;opacity:0.5" title="Not configured">${label}</a>`;
+
+      const missingVars = [];
+      if (!googleConfigured) missingVars.push('Google (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)');
+      if (!msConfigured) missingVars.push('Microsoft (MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT_ID, MICROSOFT_REDIRECT_URI)');
+      if (!zohoConfigured) missingVars.push('Zoho (ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REDIRECT_URI)');
+      const configNotice = missingVars.length
+        ? `<details><summary>Some providers are not configured</summary><p>Add the following to your <code>.env</code> file:</p><ul>${missingVars.map(v => `<li>${v}</li>`).join('')}</ul></details>`
+        : '';
+
       reply.type('text/html').send(BASE_LAYOUT('Calendar Connections', `
         <h1>Calendar Connections</h1>
-        <a href="/admin/calendars/connect/google" role="button">Connect Google Calendar</a>
-        <a href="/admin/calendars/connect/microsoft" role="button">Connect Office 365 Calendar</a>
-        <a href="/admin/calendars/connect/zoho" role="button">Connect Zoho Calendar</a>
+        <nav>
+          <a href="/admin/dashboard">Dashboard</a> |
+          <a href="/admin/bookings">Bookings</a> |
+          <a href="/admin/profiles">Profiles</a> |
+          <a href="/admin/calendars">Calendars</a> |
+          <a href="/admin/settings">Settings</a>
+        </nav>
+        ${configNotice}
+        ${connectBtn('/admin/calendars/connect/google', 'Connect Google Calendar', googleConfigured)}
+        ${connectBtn('/admin/calendars/connect/microsoft', 'Connect Office 365 Calendar', msConfigured)}
+        ${connectBtn('/admin/calendars/connect/zoho', 'Connect Zoho Calendar', zohoConfigured)}
         ${connections.length ? `
           <table>
             <thead><tr><th>Provider</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead>
@@ -351,7 +383,11 @@ function buildApp(opts = {}) {
 
     app.get('/calendars/connect/google', async (request, reply) => {
       if (!googleClientId || !googleClientSecret || !googleRedirectUri) {
-        return reply.status(500).send('Google OAuth2 is not configured');
+        return reply.status(400).type('text/html').send(BASE_LAYOUT('Not Configured', `
+          <h1>Google OAuth2 Not Configured</h1>
+          <p>Add <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>, and <code>GOOGLE_REDIRECT_URI</code> to your <code>.env</code> file, then restart the server.</p>
+          <a href="/admin/calendars" role="button" class="secondary">Back to Calendars</a>
+        `));
       }
       const url = buildGoogleAuthUrl(googleClientId, googleRedirectUri);
       return reply.redirect(url);
@@ -385,6 +421,13 @@ function buildApp(opts = {}) {
       const clientId = opts.microsoftClientId || process.env.MICROSOFT_CLIENT_ID;
       const tenantId = opts.microsoftTenantId || process.env.MICROSOFT_TENANT_ID;
       const redirectUri = opts.microsoftRedirectUri || process.env.MICROSOFT_REDIRECT_URI;
+      if (!clientId || !tenantId || !redirectUri) {
+        return reply.status(400).type('text/html').send(BASE_LAYOUT('Not Configured', `
+          <h1>Microsoft OAuth2 Not Configured</h1>
+          <p>Add <code>MICROSOFT_CLIENT_ID</code>, <code>MICROSOFT_CLIENT_SECRET</code>, <code>MICROSOFT_TENANT_ID</code>, and <code>MICROSOFT_REDIRECT_URI</code> to your <code>.env</code> file, then restart the server.</p>
+          <a href="/admin/calendars" role="button" class="secondary">Back to Calendars</a>
+        `));
+      }
       const scope = 'offline_access Calendars.ReadWrite User.Read';
       const state = crypto.randomBytes(16).toString('hex');
       request.session.set('oauthState', state);
@@ -456,6 +499,13 @@ function buildApp(opts = {}) {
     });
 
     app.get('/calendars/connect/zoho', async (request, reply) => {
+      if (!zohoClientId || !zohoClientSecret || !zohoRedirectUri) {
+        return reply.status(400).type('text/html').send(BASE_LAYOUT('Not Configured', `
+          <h1>Zoho OAuth2 Not Configured</h1>
+          <p>Add <code>ZOHO_CLIENT_ID</code>, <code>ZOHO_CLIENT_SECRET</code>, and <code>ZOHO_REDIRECT_URI</code> to your <code>.env</code> file, then restart the server.</p>
+          <a href="/admin/calendars" role="button" class="secondary">Back to Calendars</a>
+        `));
+      }
       const params = new URLSearchParams({
         client_id: zohoClientId,
         redirect_uri: zohoRedirectUri,
