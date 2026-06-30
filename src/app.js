@@ -1,9 +1,11 @@
 const crypto = require('node:crypto');
+const path = require('node:path');
 const fastify = require('fastify');
 const formbody = require('@fastify/formbody');
 const cookie = require('@fastify/cookie');
 const session = require('@fastify/session');
 const csrf = require('@fastify/csrf-protection');
+const fastifyStatic = require('@fastify/static');
 const bcrypt = require('bcrypt');
 const { createDatabase } = require('./db');
 const { buildGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserEmail } = require('./google');
@@ -31,12 +33,12 @@ function escapeHtml(str) {
 }
 
 const BASE_LAYOUT = (title, body) => `<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} - CalendarInvite</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
   <main class="container">
@@ -61,6 +63,11 @@ function buildApp(opts = {}) {
   app.decorate('fetchFn', opts.fetchFn || globalThis.fetch);
   app.decorate('zohoFetch', null);
 
+  app.register(fastifyStatic, {
+    root: path.join(__dirname, '..', 'public'),
+    prefix: '/',
+  });
+
   app.register(formbody);
   app.register(cookie);
   const sessionSecret = opts.sessionSecret || process.env.SESSION_SECRET;
@@ -78,8 +85,15 @@ function buildApp(opts = {}) {
 
   app.get('/', async (request, reply) => {
     reply.type('text/html').send(BASE_LAYOUT('Home', `
-      <h1>CalendarInvite</h1>
-      <p>Self-hosted booking tool. Pico CSS powered.</p>
+      <div style="text-align: center; padding: 4rem 0;">
+        <h1 style="font-size: 3rem; margin-bottom: 1rem;">CalendarInvite</h1>
+        <p style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 2rem;">Modern self-hosted booking solution</p>
+        <p style="max-width: 600px; margin: 0 auto 2rem;">
+          Seamlessly manage your availability and let others book time with you.
+          Connect your calendar, set your schedule, and share your booking link.
+        </p>
+        <a href="/admin/login" role="button">Admin Login</a>
+      </div>
     `));
   });
 
@@ -94,13 +108,24 @@ function buildApp(opts = {}) {
     app.get('/login', async (request, reply) => {
       const token = reply.generateCsrf();
       reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
-        <h1>Admin Login</h1>
-        <form method="POST" action="/admin/login">
-          <input type="hidden" name="_csrf" value="${token}">
-          <label>Username <input type="text" name="username" required></label>
-          <label>Password <input type="password" name="password" required></label>
-          <button type="submit">Login</button>
-        </form>
+        <div style="max-width: 450px; margin: 4rem auto;">
+          <article>
+            <h1 style="text-align: center; margin-bottom: 2rem;">CalendarInvite</h1>
+            <h2 style="text-align: center; font-size: 1.25rem; margin-bottom: 2rem; color: var(--text-secondary);">Admin Login</h2>
+            <form method="POST" action="/admin/login">
+              <input type="hidden" name="_csrf" value="${token}">
+              <label>
+                Username
+                <input type="text" name="username" placeholder="Enter your username" required autofocus>
+              </label>
+              <label>
+                Password
+                <input type="password" name="password" placeholder="Enter your password" required>
+              </label>
+              <button type="submit" style="width: 100%;">Sign In</button>
+            </form>
+          </article>
+        </div>
       `));
     });
 
@@ -111,14 +136,27 @@ function buildApp(opts = {}) {
       if (!admin || !(await bcrypt.compare(password || '', admin.password_hash))) {
         const token = reply.generateCsrf();
         return reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
-          <h1>Admin Login</h1>
-          <p style="color: var(--pico-color-red-500);">Invalid username or password</p>
-          <form method="POST" action="/admin/login">
-            <input type="hidden" name="_csrf" value="${token}">
-            <label>Username <input type="text" name="username" required></label>
-            <label>Password <input type="password" name="password" required></label>
-            <button type="submit">Login</button>
-          </form>
+          <div style="max-width: 450px; margin: 4rem auto;">
+            <article>
+              <h1 style="text-align: center; margin-bottom: 2rem;">CalendarInvite</h1>
+              <h2 style="text-align: center; font-size: 1.25rem; margin-bottom: 2rem; color: var(--text-secondary);">Admin Login</h2>
+              <div role="alert" class="error">
+                Invalid username or password. Please try again.
+              </div>
+              <form method="POST" action="/admin/login">
+                <input type="hidden" name="_csrf" value="${token}">
+                <label>
+                  Username
+                  <input type="text" name="username" placeholder="Enter your username" value="${escapeHtml(username || '')}" required autofocus>
+                </label>
+                <label>
+                  Password
+                  <input type="password" name="password" placeholder="Enter your password" required>
+                </label>
+                <button type="submit" style="width: 100%;">Sign In</button>
+              </form>
+            </article>
+          </div>
         `));
       }
 
@@ -153,26 +191,34 @@ function buildApp(opts = {}) {
       }).join('');
 
       reply.type('text/html').send(BASE_LAYOUT('Dashboard', `
-        <h1>Dashboard</h1>
         <nav>
-          <a href="/admin/dashboard">Dashboard</a> |
-          <a href="/admin/bookings">Bookings</a> |
-          <a href="/admin/profiles">Profiles</a> |
-          <a href="/admin/calendars">Calendars</a> |
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/bookings">Bookings</a>
+          <a href="/admin/profiles">Profiles</a>
+          <a href="/admin/calendars">Calendars</a>
           <a href="/admin/settings">Settings</a>
         </nav>
+        <h1>Dashboard</h1>
         <div class="grid">
-          <article><h3>Active Profiles</h3><p><strong>${activeProfiles}</strong></p></article>
-          <article><h3>Upcoming Bookings</h3><p><strong>${upcomingCount}</strong></p></article>
+          <article>
+            <h3>Active Profiles</h3>
+            <p><strong>${activeProfiles}</strong></p>
+          </article>
+          <article>
+            <h3>Upcoming Bookings</h3>
+            <p><strong>${upcomingCount}</strong></p>
+          </article>
         </div>
         ${next5.length ? `
-          <h2>Next Upcoming Bookings</h2>
-          <table>
-            <thead><tr><th>Date/Time</th><th>Title</th><th>Booker</th><th>Profile</th></tr></thead>
-            <tbody>${next5Rows}</tbody>
-          </table>
-        ` : '<p>No upcoming bookings.</p>'}
-        <form method="POST" action="/admin/logout">
+          <div class="card">
+            <h2>Next Upcoming Bookings</h2>
+            <table>
+              <thead><tr><th>Date/Time</th><th>Title</th><th>Booker</th><th>Profile</th></tr></thead>
+              <tbody>${next5Rows}</tbody>
+            </table>
+          </div>
+        ` : '<article><p>No upcoming bookings.</p></article>'}
+        <form method="POST" action="/admin/logout" style="margin-top: 2rem;">
           <input type="hidden" name="_csrf" value="${token}">
           <button type="submit" class="secondary">Logout</button>
         </form>
@@ -220,12 +266,12 @@ function buildApp(opts = {}) {
         const start = new Date(b.start_time);
         const dateStr = start.toLocaleString('en-US', { timeZone: adminTz, dateStyle: 'medium', timeStyle: 'short' });
         const statusBadge = b.status === 'cancelled'
-          ? '<span class="badge" style="background:var(--pico-color-red-500);color:white;padding:2px 8px;border-radius:4px">cancelled</span>'
-          : '<span class="badge" style="background:var(--pico-color-green-500);color:white;padding:2px 8px;border-radius:4px">confirmed</span>';
+          ? '<span class="badge error">Cancelled</span>'
+          : '<span class="badge success">Confirmed</span>';
         const cancelBtn = b.status === 'confirmed'
-          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="secondary outline" style="padding:4px 8px;margin:0">Cancel</button></form>`
+          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="outline" style="padding:4px 12px;margin:0">Cancel</button></form>`
           : '';
-        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes}</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td>${cancelBtn}</td></tr>`;
+        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes} min</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td>${cancelBtn}</td></tr>`;
       }).join('');
 
       const pagination = totalPages > 1 ? `<nav><ul>${Array.from({length: totalPages}, (_, i) => {
@@ -238,29 +284,31 @@ function buildApp(opts = {}) {
       }).join('')}</ul></nav>` : '';
 
       reply.type('text/html').send(BASE_LAYOUT('Bookings', `
-        <h1>Bookings</h1>
         <nav>
-          <a href="/admin/dashboard">Dashboard</a> |
-          <a href="/admin/bookings">Bookings</a> |
-          <a href="/admin/profiles">Profiles</a> |
-          <a href="/admin/calendars">Calendars</a> |
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/bookings">Bookings</a>
+          <a href="/admin/profiles">Profiles</a>
+          <a href="/admin/calendars">Calendars</a>
           <a href="/admin/settings">Settings</a>
         </nav>
-        <form method="GET" action="/admin/bookings" role="group">
-          <select name="status">
-            <option value="">All Statuses</option>
-            <option value="confirmed"${status === 'confirmed' ? ' selected' : ''}>Confirmed</option>
-            <option value="cancelled"${status === 'cancelled' ? ' selected' : ''}>Cancelled</option>
-          </select>
-          <select name="profile_id">
-            <option value="">All Profiles</option>
-            ${profileOptions}
-          </select>
-          <button type="submit">Filter</button>
-        </form>
+        <h1>Bookings</h1>
+        <div class="card">
+          <form method="GET" action="/admin/bookings" role="group">
+            <select name="status">
+              <option value="">All Statuses</option>
+              <option value="confirmed"${status === 'confirmed' ? ' selected' : ''}>Confirmed</option>
+              <option value="cancelled"${status === 'cancelled' ? ' selected' : ''}>Cancelled</option>
+            </select>
+            <select name="profile_id">
+              <option value="">All Profiles</option>
+              ${profileOptions}
+            </select>
+            <button type="submit">Filter</button>
+          </form>
+        </div>
         <table>
           <thead><tr><th>Date/Time</th><th>Duration</th><th>Profile</th><th>Booker</th><th>Email</th><th>Title</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);">No bookings found</td></tr>'}</tbody>
         </table>
         ${pagination}
       `));
@@ -360,24 +408,26 @@ function buildApp(opts = {}) {
         : '';
 
       reply.type('text/html').send(BASE_LAYOUT('Calendar Connections', `
-        <h1>Calendar Connections</h1>
         <nav>
-          <a href="/admin/dashboard">Dashboard</a> |
-          <a href="/admin/bookings">Bookings</a> |
-          <a href="/admin/profiles">Profiles</a> |
-          <a href="/admin/calendars">Calendars</a> |
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/bookings">Bookings</a>
+          <a href="/admin/profiles">Profiles</a>
+          <a href="/admin/calendars">Calendars</a>
           <a href="/admin/settings">Settings</a>
         </nav>
+        <h1>Calendar Connections</h1>
         ${configNotice}
-        ${connectBtn('/admin/calendars/connect/google', 'Connect Google Calendar', googleConfigured)}
-        ${connectBtn('/admin/calendars/connect/microsoft', 'Connect Office 365 Calendar', msConfigured)}
-        ${connectBtn('/admin/calendars/connect/zoho', 'Connect Zoho Calendar', zohoConfigured)}
+        <div class="card" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          ${connectBtn('/admin/calendars/connect/google', '🟢 Connect Google Calendar', googleConfigured)}
+          ${connectBtn('/admin/calendars/connect/microsoft', '🔵 Connect Office 365 Calendar', msConfigured)}
+          ${connectBtn('/admin/calendars/connect/zoho', '🟠 Connect Zoho Calendar', zohoConfigured)}
+        </div>
         ${connections.length ? `
           <table>
             <thead><tr><th>Provider</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${connectionRows}</tbody>
           </table>
-        ` : '<p>No calendar connections yet.</p>'}
+        ` : '<article><p>No calendar connections yet. Connect your calendar to get started.</p></article>'}
       `));
     });
 
@@ -580,28 +630,45 @@ function buildApp(opts = {}) {
       ).join('');
 
       reply.type('text/html').send(BASE_LAYOUT('Settings', `
+        <nav>
+          <a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/bookings">Bookings</a>
+          <a href="/admin/profiles">Profiles</a>
+          <a href="/admin/calendars">Calendars</a>
+          <a href="/admin/settings">Settings</a>
+        </nav>
         <h1>Settings</h1>
-        ${flash ? `<p role="alert">${escapeHtml(flash)}</p>` : ''}
-        <section>
+        ${flash ? `<div role="alert" class="success">${escapeHtml(flash)}</div>` : ''}
+        <div class="card">
           <h2>Timezone</h2>
           <form method="POST" action="/admin/settings/timezone">
             <input type="hidden" name="_csrf" value="${token}">
-            <label>Timezone
+            <label>
+              Select your timezone
               <select name="timezone">${timezoneOptions}</select>
             </label>
             <button type="submit">Save Timezone</button>
           </form>
-        </section>
-        <section>
+        </div>
+        <div class="card">
           <h2>Change Password</h2>
           <form method="POST" action="/admin/settings/password">
             <input type="hidden" name="_csrf" value="${token}">
-            <label>Current Password <input type="password" name="current_password" required></label>
-            <label>New Password <input type="password" name="new_password" required></label>
-            <label>Confirm New Password <input type="password" name="confirm_password" required></label>
+            <label>
+              Current Password
+              <input type="password" name="current_password" placeholder="Enter current password" required>
+            </label>
+            <label>
+              New Password
+              <input type="password" name="new_password" placeholder="Enter new password" required>
+            </label>
+            <label>
+              Confirm New Password
+              <input type="password" name="confirm_password" placeholder="Confirm new password" required>
+            </label>
             <button type="submit">Change Password</button>
           </form>
-        </section>
+        </div>
       `));
     });
 

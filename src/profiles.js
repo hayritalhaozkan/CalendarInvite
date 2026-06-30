@@ -121,39 +121,82 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
   const overrideSection = isEdit ? overridesHtml(token, profile, overrides || []) : '';
 
   return `
+    <nav>
+      <a href="/admin/dashboard">Dashboard</a>
+      <a href="/admin/bookings">Bookings</a>
+      <a href="/admin/profiles">Profiles</a>
+      <a href="/admin/calendars">Calendars</a>
+      <a href="/admin/settings">Settings</a>
+    </nav>
     <h1>${title}</h1>
-    ${error ? `<p style="color: var(--pico-color-red-500);">${escapeHtml(error)}</p>` : ''}
-    <form method="POST" action="${action}">
-      <input type="hidden" name="_csrf" value="${token}">
-      <label>Slug <input type="text" name="slug" value="${escapeHtml(profile?.slug || '')}" required></label>
-      <label>Name <input type="text" name="name" value="${escapeHtml(profile?.name || '')}" required></label>
-      <label>Meeting Link URL <input type="url" name="meeting_link_url" value="${escapeHtml(profile?.meeting_link_url || '')}"></label>
-      <label>Meeting Tool
-        <select name="meeting_tool">
-          <option value="">-- None --</option>
-          <option value="meet" ${profile?.meeting_tool === 'meet' ? 'selected' : ''}>Google Meet</option>
-          <option value="teams" ${profile?.meeting_tool === 'teams' ? 'selected' : ''}>Microsoft Teams</option>
-        </select>
-      </label>
-      <label>Write Calendar
-        <select name="write_calendar_id">${writeCalendarOptions}</select>
-      </label>
-      <fieldset>
-        <legend>Read Calendars</legend>
-        ${readCalendarCheckboxes || '<p>No calendar connections available.</p>'}
-      </fieldset>
-      <fieldset>
-        <legend>Default Attendees</legend>
-        ${attendeeInputs}
-      </fieldset>
-      <fieldset>
-        <legend>Schedule Template</legend>
-        ${scheduleHtml}
-      </fieldset>
-      <button type="submit">${isEdit ? 'Update' : 'Create'} Profile</button>
-    </form>
+    ${error ? `<div role="alert" class="error">${escapeHtml(error)}</div>` : ''}
+    <div class="card">
+      <form method="POST" action="${action}">
+        <input type="hidden" name="_csrf" value="${token}">
+
+        <fieldset>
+          <legend>Profile Settings</legend>
+          <label>
+            Slug
+            <input type="text" name="slug" value="${escapeHtml(profile?.slug || '')}" placeholder="my-booking-page" required>
+            <small style="color: var(--text-secondary);">URL-friendly identifier (e.g., my-meeting). Will be used in /book/slug</small>
+          </label>
+
+          <label>
+            Display Name
+            <input type="text" name="name" value="${escapeHtml(profile?.name || '')}" placeholder="30 Min Meeting" required>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Meeting Configuration</legend>
+          <label>
+            Meeting Link URL
+            <input type="url" name="meeting_link_url" value="${escapeHtml(profile?.meeting_link_url || '')}" placeholder="https://meet.google.com/abc-defg-hij">
+            <small style="color: var(--text-secondary);">Static meeting room URL (optional)</small>
+          </label>
+
+          <label>
+            Meeting Tool
+            <select name="meeting_tool">
+              <option value="">-- None --</option>
+              <option value="meet" ${profile?.meeting_tool === 'meet' ? 'selected' : ''}>Google Meet</option>
+              <option value="teams" ${profile?.meeting_tool === 'teams' ? 'selected' : ''}>Microsoft Teams</option>
+            </select>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Calendar Integration</legend>
+          <label>
+            Write Calendar
+            <select name="write_calendar_id">${writeCalendarOptions}</select>
+            <small style="color: var(--text-secondary);">Calendar where bookings will be created</small>
+          </label>
+
+          <label style="margin-top: 1rem; display: block; font-weight: 600;">Read Calendars (for availability)</label>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            ${readCalendarCheckboxes || '<p style="color: var(--text-secondary);">No calendar connections available. <a href="/admin/calendars">Connect a calendar</a></p>'}
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Default Attendees</legend>
+          <small style="color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Email addresses to include in every booking</small>
+          ${attendeeInputs}
+        </fieldset>
+
+        <fieldset>
+          <legend>Weekly Schedule</legend>
+          <small style="color: var(--text-secondary); display: block; margin-bottom: 1rem;">Set your recurring availability for each day of the week</small>
+          ${scheduleHtml}
+        </fieldset>
+
+        <button type="submit">${isEdit ? 'Update' : 'Create'} Profile</button>
+        <a href="/admin/profiles" role="button" class="secondary" style="margin-left: 1rem;">Cancel</a>
+      </form>
+    </div>
     ${overrideSection}
-    <a href="/admin/profiles">&larr; Back to profiles</a>
   `;
 }
 
@@ -162,20 +205,34 @@ function registerProfileRoutes(app) {
     const profiles = app.db.prepare("SELECT * FROM booking_profiles ORDER BY created_at DESC").all();
     const rows = profiles.map(p => `
       <tr>
-        <td>${escapeHtml(p.slug)}</td>
+        <td><code>${escapeHtml(p.slug)}</code></td>
         <td>${escapeHtml(p.name)}</td>
-        <td>${p.is_active ? 'Active' : 'Inactive'}</td>
-        <td><a href="/admin/profiles/${p.id}/edit">Edit</a></td>
+        <td><span class="badge ${p.is_active ? 'success' : 'error'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td>
+          <a href="/admin/profiles/${p.id}/edit" role="button" class="outline" style="padding: 4px 12px; margin: 0;">Edit</a>
+          <a href="/book/${escapeHtml(p.slug)}" target="_blank" role="button" class="secondary outline" style="padding: 4px 12px; margin: 0 0 0 8px;">View Page</a>
+        </td>
       </tr>
     `).join('');
 
     const html = `
-      <h1>Booking Profiles</h1>
-      <a href="/admin/profiles/new" role="button">New Profile</a>
-      <table>
-        <thead><tr><th>Slug</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <nav>
+        <a href="/admin/dashboard">Dashboard</a>
+        <a href="/admin/bookings">Bookings</a>
+        <a href="/admin/profiles">Profiles</a>
+        <a href="/admin/calendars">Calendars</a>
+        <a href="/admin/settings">Settings</a>
+      </nav>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <h1 style="margin-bottom: 0;">Booking Profiles</h1>
+        <a href="/admin/profiles/new" role="button">+ New Profile</a>
+      </div>
+      ${profiles.length ? `
+        <table>
+          <thead><tr><th>Slug</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      ` : '<article><p>No profiles yet. Create your first booking profile to get started.</p><a href="/admin/profiles/new" role="button">Create Profile</a></article>'}
     `;
     reply.type('text/html').send(require('./app').BASE_LAYOUT('Profiles', html));
   });

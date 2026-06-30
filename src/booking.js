@@ -226,46 +226,71 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
 
     if (!profile.is_active) {
       return reply.type('text/html').send(baseLayout(`Book - ${escapeHtml(profile.name)}`, `
-        <h1>${escapeHtml(profile.name)}</h1>
-        <p>Not currently accepting bookings</p>
+        <div style="text-align: center; padding: 4rem 0;">
+          <h1>${escapeHtml(profile.name)}</h1>
+          <article>
+            <p style="color: var(--text-secondary);">This booking profile is not currently accepting bookings.</p>
+          </article>
+        </div>
       `));
     }
 
     reply.type('text/html').send(baseLayout(`Book - ${escapeHtml(profile.name)}`, `
-      <h1>${escapeHtml(profile.name)}</h1>
-      <div id="booking-widget">
-        <section id="duration-step">
-          <h2>Select Duration</h2>
-          <div role="group">
-            <button class="duration-btn" data-duration="30">30 min</button>
-            <button class="duration-btn" data-duration="45">45 min</button>
-            <button class="duration-btn" data-duration="60">60 min</button>
-          </div>
-        </section>
-        <section id="calendar-step" style="display:none">
-          <h2>Select a Date</h2>
-          <div id="calendar-grid"></div>
-        </section>
-        <section id="slots-step" style="display:none">
-          <h2>Available Times</h2>
-          <div id="time-slots"></div>
-        </section>
-        <section id="form-step" style="display:none">
-          <h2>Your Details</h2>
-          <div id="booking-error" style="display:none;color:var(--pico-color-red-500)"></div>
-          <form id="booking-form">
-            <label>Name (required) <input type="text" name="name" required></label>
-            <label>Email (required) <input type="email" name="email" required></label>
-            <label>Additional Attendees (comma-separated emails) <input type="text" name="additional_attendees"></label>
-            <label>Title <input type="text" name="title" placeholder="Meeting with [Your Name]"></label>
-            <label>Description <textarea name="description"></textarea></label>
-            <button type="submit">Confirm Booking</button>
-          </form>
-        </section>
-        <section id="confirmation-step" style="display:none">
-          <h2>Booking Confirmed</h2>
-          <div id="confirmation-details"></div>
-        </section>
+      <div style="max-width: 900px; margin: 2rem auto;">
+        <div style="text-align: center; margin-bottom: 3rem;">
+          <h1 style="margin-bottom: 0.5rem;">${escapeHtml(profile.name)}</h1>
+          <p style="color: var(--text-secondary);">Select a time that works for you</p>
+        </div>
+        <div id="booking-widget">
+          <section id="duration-step">
+            <h2>Duration</h2>
+            <div role="group">
+              <button class="duration-btn" data-duration="30">30 min</button>
+              <button class="duration-btn" data-duration="45">45 min</button>
+              <button class="duration-btn" data-duration="60">60 min</button>
+            </div>
+          </section>
+          <section id="calendar-step" style="display:none">
+            <h2>Select a Date</h2>
+            <div id="calendar-grid"></div>
+          </section>
+          <section id="slots-step" style="display:none">
+            <h2>Available Times</h2>
+            <div id="time-slots"></div>
+          </section>
+          <section id="form-step" style="display:none">
+            <h2>Your Information</h2>
+            <div id="booking-error" style="display:none"></div>
+            <form id="booking-form">
+              <label>
+                Name
+                <input type="text" name="name" placeholder="Your full name" required>
+              </label>
+              <label>
+                Email
+                <input type="email" name="email" placeholder="your.email@example.com" required>
+              </label>
+              <label>
+                Additional Attendees
+                <input type="text" name="additional_attendees" placeholder="colleague@example.com, other@example.com">
+                <small style="color: var(--text-secondary);">Separate multiple emails with commas</small>
+              </label>
+              <label>
+                Meeting Title
+                <input type="text" name="title" placeholder="Meeting with ${escapeHtml(profile.name)}">
+              </label>
+              <label>
+                Description (optional)
+                <textarea name="description" placeholder="Add any notes or agenda items..." rows="4"></textarea>
+              </label>
+              <button type="submit" style="width: 100%;">Confirm Booking</button>
+            </form>
+          </section>
+          <section id="confirmation-step" style="display:none">
+            <h2 style="color: var(--success); text-align: center;">✓ Booking Confirmed</h2>
+            <div id="confirmation-details"></div>
+          </section>
+        </div>
       </div>
       <script>
         (function() {
@@ -276,8 +301,16 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
 
           document.querySelectorAll('.duration-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
+              document.querySelectorAll('.duration-btn').forEach(function(b) {
+                b.classList.remove('contrast');
+                b.classList.add('outline');
+              });
+              btn.classList.remove('outline');
+              btn.classList.add('contrast');
               selectedDuration = parseInt(btn.dataset.duration);
               document.getElementById('calendar-step').style.display = '';
+              document.getElementById('slots-step').style.display = 'none';
+              document.getElementById('form-step').style.display = 'none';
               renderCalendar();
             });
           });
@@ -306,12 +339,12 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
             document.getElementById('slots-step').style.display = '';
             document.getElementById('form-step').style.display = 'none';
             var container = document.getElementById('time-slots');
-            container.innerHTML = '<p>Loading...</p>';
+            container.innerHTML = '<p class="loading" style="text-align:center;color:var(--text-secondary);">Loading available times...</p>';
             fetch('/api/book/' + slug + '/slots?date=' + dateStr + '&duration=' + selectedDuration + '&timezone=' + tz)
               .then(function(res) { return res.json(); })
               .then(function(data) {
                 if (!data.slots.length) {
-                  container.innerHTML = '<p>No available times for this date.</p>';
+                  container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);">No available times for this date. Please try another date.</p>';
                   return;
                 }
                 container.innerHTML = data.slots.map(function(s) {
@@ -320,11 +353,18 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
                 }).join('');
                 container.querySelectorAll('.slot-btn').forEach(function(btn) {
                   btn.addEventListener('click', function() {
+                    document.querySelectorAll('.slot-btn').forEach(function(b) { b.classList.remove('contrast'); b.classList.add('outline'); });
+                    btn.classList.remove('outline');
+                    btn.classList.add('contrast');
                     selectedSlotStart = btn.dataset.start;
                     document.getElementById('form-step').style.display = '';
                     document.getElementById('booking-error').style.display = 'none';
+                    document.getElementById('form-step').scrollIntoView({ behavior: 'smooth' });
                   });
                 });
+              })
+              .catch(function(err) {
+                container.innerHTML = '<p style="text-align:center;color:var(--error);">Failed to load available times. Please try again.</p>';
               });
           }
 
@@ -334,7 +374,11 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
             e.preventDefault();
             var form = e.target;
             var errDiv = document.getElementById('booking-error');
+            var submitBtn = form.querySelector('button[type="submit"]');
             errDiv.style.display = 'none';
+
+            submitBtn.textContent = 'Creating booking...';
+            submitBtn.disabled = true;
 
             var attendeesRaw = form.additional_attendees.value.trim();
             var additionalAttendees = attendeesRaw ? attendeesRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
@@ -358,21 +402,34 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
             .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
             .then(function(result) {
               if (!result.ok) {
-                errDiv.textContent = result.data.error || 'Something went wrong';
+                errDiv.textContent = result.data.error || 'Something went wrong. Please try again.';
+                errDiv.className = 'alert error';
                 errDiv.style.display = '';
+                submitBtn.textContent = 'Confirm Booking';
+                submitBtn.disabled = false;
                 return;
               }
               var b = result.data.booking;
               document.getElementById('booking-widget').querySelectorAll('section').forEach(function(s) { s.style.display = 'none'; });
               var conf = document.getElementById('confirmation-step');
               conf.style.display = '';
+              conf.scrollIntoView({ behavior: 'smooth' });
               var startLocal = new Date(b.start_time).toLocaleString(undefined, { timeZone: tz, dateStyle: 'full', timeStyle: 'short' });
               var endLocal = new Date(b.end_time).toLocaleTimeString(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit' });
-              var details = '<p><strong>' + esc(b.title) + '</strong></p>';
-              details += '<p>' + esc(startLocal) + ' - ' + esc(endLocal) + ' (' + b.duration_minutes + ' min)</p>';
-              if (b.meeting_link) details += '<p>Meeting link: <a href="' + esc(b.meeting_link) + '">' + esc(b.meeting_link) + '</a></p>';
-              details += '<p>Attendees: ' + b.attendees.map(esc).join(', ') + '</p>';
+              var details = '<article><h3>' + esc(b.title) + '</h3>';
+              details += '<p><strong>When:</strong> ' + esc(startLocal) + ' - ' + esc(endLocal) + '</p>';
+              details += '<p><strong>Duration:</strong> ' + b.duration_minutes + ' minutes</p>';
+              if (b.meeting_link) details += '<p><strong>Meeting Link:</strong> <a href="' + esc(b.meeting_link) + '" target="_blank">' + esc(b.meeting_link) + '</a></p>';
+              details += '<p><strong>Attendees:</strong> ' + b.attendees.map(esc).join(', ') + '</p>';
+              details += '<p style="margin-top:2rem;color:var(--text-secondary);">A calendar invitation has been sent to all attendees.</p></article>';
               document.getElementById('confirmation-details').innerHTML = details;
+            })
+            .catch(function(err) {
+              errDiv.textContent = 'Network error. Please check your connection and try again.';
+              errDiv.className = 'alert error';
+              errDiv.style.display = '';
+              submitBtn.textContent = 'Confirm Booking';
+              submitBtn.disabled = false;
             });
           });
         })();
@@ -681,39 +738,53 @@ function registerCancellationPage(app, { encryptionKey, baseLayout }) {
     const booking = app.db.prepare("SELECT b.*, bp.name as profile_name FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id WHERE b.cancellation_token = ?").get(token);
 
     if (!booking) {
-      return reply.code(404).type('text/html').send(baseLayout('Not Found', '<h1>Booking not found</h1>'));
+      return reply.code(404).type('text/html').send(baseLayout('Not Found', `
+        <div style="text-align: center; padding: 4rem 0;">
+          <h1>Booking Not Found</h1>
+          <p style="color: var(--text-secondary);">The booking link you're looking for doesn't exist or has expired.</p>
+          <a href="/" role="button">Go Home</a>
+        </div>
+      `));
     }
 
     if (booking.status === 'cancelled') {
       return reply.type('text/html').send(baseLayout('Already Cancelled', `
-        <h1>Booking Already Cancelled</h1>
-        <p>This booking has already been cancelled.</p>
+        <div style="text-align: center; padding: 4rem 0;">
+          <article style="max-width: 500px; margin: 0 auto;">
+            <h1 style="color: var(--text-secondary);">Already Cancelled</h1>
+            <p>This booking has already been cancelled.</p>
+            <a href="/" role="button" class="secondary">Go Home</a>
+          </article>
+        </div>
       `));
     }
 
     const startDate = new Date(booking.start_time);
     const endDate = new Date(booking.end_time);
-    const dateStr = startDate.toISOString().split('T')[0];
-    const startTime = startDate.toISOString().split('T')[1].slice(0, 5);
-    const endTime = endDate.toISOString().split('T')[1].slice(0, 5);
+    const startLocal = startDate.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' });
+    const endLocal = endDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const attendees = [booking.booker_email];
     if (booking.additional_attendees) {
       try { attendees.push(...JSON.parse(booking.additional_attendees)); } catch {}
     }
 
     reply.type('text/html').send(baseLayout('Cancel Booking', `
-      <h1>Cancel Booking</h1>
-      <p>Are you sure you want to cancel this booking?</p>
-      <article>
-        <header><strong>${escapeHtml(booking.title)}</strong></header>
-        <p>Date: ${escapeHtml(dateStr)}</p>
-        <p>Time: ${escapeHtml(startTime)} - ${escapeHtml(endTime)} UTC</p>
-        <p>Attendees: ${attendees.map(e => escapeHtml(e)).join(', ')}</p>
-      </article>
-      <form method="POST" action="/api/cancel/${escapeHtml(token)}">
-        <button type="submit" class="contrast">Confirm Cancellation</button>
-      </form>
-      <a href="/" role="button" class="outline">Keep Booking</a>
+      <div style="max-width: 600px; margin: 3rem auto;">
+        <h1 style="text-align: center; margin-bottom: 1rem;">Cancel Booking</h1>
+        <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">Are you sure you want to cancel this booking?</p>
+        <article>
+          <h3>${escapeHtml(booking.title)}</h3>
+          <p><strong>When:</strong> ${escapeHtml(startLocal)} - ${escapeHtml(endLocal)}</p>
+          <p><strong>Duration:</strong> ${booking.duration_minutes} minutes</p>
+          <p><strong>Attendees:</strong><br>${attendees.map(e => escapeHtml(e)).join('<br>')}</p>
+        </article>
+        <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+          <form method="POST" action="/api/cancel/${escapeHtml(token)}" style="flex: 1; margin: 0;">
+            <button type="submit" class="contrast" style="width: 100%;">Confirm Cancellation</button>
+          </form>
+          <a href="/" role="button" class="outline" style="flex: 1;">Keep Booking</a>
+        </div>
+      </div>
     `));
   });
 }
