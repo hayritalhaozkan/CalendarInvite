@@ -1,4 +1,3 @@
-
 :root {
   --primary: #0078d4;
   --primary-hover: #106ebe;
@@ -84,7 +83,12 @@ body {
   padding: var(--spacing-lg);
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-weight: 600;
   line-height: 1.2;
   color: var(--text-primary);
@@ -143,7 +147,8 @@ nav a:first-child {
 }
 
 /* Cards & Articles */
-article, .card {
+article,
+.card {
   background: var(--neutral-0);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -153,7 +158,8 @@ article, .card {
   transition: var(--transition);
 }
 
-article:hover, .card:hover {
+article:hover,
+.card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--border-hover);
 }
@@ -385,7 +391,68 @@ tbody tr:last-child td {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: var(--spacing-lg);
-  margin-bottom: var(--spacing-xl);
+  margin-bottom: var(--spacing-md);
+}
+
+/* Schedule Grid */
+.schedule-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.schedule-day {
+  display: flex;
+  align-items: flex-start;
+  padding: var(--spacing-md);
+  background: var(--neutral-0);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  gap: var(--spacing-md);
+  transition: all 0.2s ease;
+}
+
+.schedule-day.disabled {
+  background: var(--neutral-10);
+  opacity: 0.6;
+}
+
+.schedule-day .day-toggle {
+  flex: 0 0 130px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.schedule-day .time-ranges {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.schedule-day .time-range {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.schedule-day .time-range input[type="time"] {
+  width: auto;
+  margin: 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+/* Error Alerts */
+.error {
+  background: var(--danger-light);
+  color: var(--danger-dark);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+  border-left: 4px solid var(--danger);
 }
 
 /* Badges & Status */
@@ -415,7 +482,8 @@ tbody tr:last-child td {
 }
 
 /* Alerts & Messages */
-[role="alert"], .alert {
+[role="alert"],
+.alert {
   padding: var(--spacing-md);
   border-radius: var(--radius-md);
   margin-bottom: var(--spacing-lg);
@@ -423,19 +491,22 @@ tbody tr:last-child td {
   font-size: var(--font-size-sm);
 }
 
-[role="alert"].error, .alert.error {
+[role="alert"].error,
+.alert.error {
   background: var(--error-light);
   border-color: var(--error);
   color: var(--error);
 }
 
-[role="alert"].success, .alert.success {
+[role="alert"].success,
+.alert.success {
   background: var(--success-light);
   border-color: var(--success);
   color: var(--success);
 }
 
-[role="alert"].warning, .alert.warning {
+[role="alert"].warning,
+.alert.warning {
   background: var(--warning-light);
   border-color: var(--warning);
   color: var(--warning);
@@ -846,18 +917,45 @@ input[type="radio"] {
 }
 
 /* Utility Classes */
-.mt-1 { margin-top: var(--spacing-xs); }
-.mt-2 { margin-top: var(--spacing-sm); }
-.mt-3 { margin-top: var(--spacing-md); }
-.mt-4 { margin-top: var(--spacing-lg); }
+.mt-1 {
+  margin-top: var(--spacing-xs);
+}
 
-.mb-1 { margin-bottom: var(--spacing-xs); }
-.mb-2 { margin-bottom: var(--spacing-sm); }
-.mb-3 { margin-bottom: var(--spacing-md); }
-.mb-4 { margin-bottom: var(--spacing-lg); }
+.mt-2 {
+  margin-top: var(--spacing-sm);
+}
 
-.text-center { text-align: center; }
-.text-right { text-align: right; }
+.mt-3 {
+  margin-top: var(--spacing-md);
+}
+
+.mt-4 {
+  margin-top: var(--spacing-lg);
+}
+
+.mb-1 {
+  margin-bottom: var(--spacing-xs);
+}
+
+.mb-2 {
+  margin-bottom: var(--spacing-sm);
+}
+
+.mb-3 {
+  margin-bottom: var(--spacing-md);
+}
+
+.mb-4 {
+  margin-bottom: var(--spacing-lg);
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -877,7 +975,8 @@ input[type="radio"] {
     font-size: var(--font-size-xs);
   }
 
-  th, td {
+  th,
+  td {
     padding: var(--spacing-sm);
   }
 
@@ -928,9 +1027,12 @@ input[type="radio"] {
 
 /* Loading States */
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }

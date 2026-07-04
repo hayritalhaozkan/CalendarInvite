@@ -129,8 +129,12 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
     `<option value="${c.id}">${escapeHtml(c.email)} (${c.provider})</option>`
   ).join('');
 
-  const writeCalendarOptions = `<option value="">-- None --</option>` + calendars.map(c =>
-    `<option value="${c.id}" ${profile && profile.write_calendar_id === c.id ? 'selected' : ''}>${escapeHtml(c.email)} (${c.provider})</option>`
+  const writeCalendarIds = isEdit
+    ? (schedules.writeCalendarIds || []).concat(profile.write_calendar_id ? [profile.write_calendar_id] : [])
+    : [];
+
+  const writeCalendarCheckboxes = calendars.map(c =>
+    `<label><input type="checkbox" name="write_calendar_ids[]" value="${c.id}" ${writeCalendarIds.includes(c.id) ? 'checked' : ''}> ${escapeHtml(c.email)} (${c.provider})</label>`
   ).join('');
 
   const readCalendarIds = isEdit
@@ -145,17 +149,40 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
     ? attendees.map(e => `<input type="text" name="attendees[]" value="${escapeHtml(e)}">`).join('')
     : '<input type="text" name="attendees[]" value="">';
 
-  const scheduleHtml = DAYS.map((dayName, dayIdx) => {
+  const scheduleHtml = `<div class="schedule-grid">` + DAYS.map((dayName, dayIdx) => {
     const daySchedules = (schedules.templates || []).filter(s => s.day_of_week === dayIdx);
-    const ranges = daySchedules.length > 0
-      ? daySchedules.map(s => {
-          const localStart = convertUTCToLocalTime(s.start_time, adminTimezone);
-          const localEnd = convertUTCToLocalTime(s.end_time, adminTimezone);
-          return `<div><input type="time" name="schedule[${dayIdx}][start][]" value="${localStart}"> - <input type="time" name="schedule[${dayIdx}][end][]" value="${localEnd}"></div>`;
-        }).join('')
-      : `<div><input type="time" name="schedule[${dayIdx}][start][]" value=""> - <input type="time" name="schedule[${dayIdx}][end][]" value=""></div>`;
-    return `<fieldset><legend>${dayName}</legend>${ranges}</fieldset>`;
-  }).join('');
+    const isActive = daySchedules.length > 0;
+    
+    let rangesHtml = '';
+    if (isActive) {
+      rangesHtml = daySchedules.map(s => {
+        const localStart = convertUTCToLocalTime(s.start_time, adminTimezone);
+        const localEnd = convertUTCToLocalTime(s.end_time, adminTimezone);
+        return `<div class="time-range"><input type="time" name="schedule[${dayIdx}][start][]" value="${localStart}" required> <span>-</span> <input type="time" name="schedule[${dayIdx}][end][]" value="${localEnd}" required><button type="button" class="danger outline remove-range" style="padding:4px 8px; border:none;" title="Remove">✕</button></div>`;
+      }).join('');
+    } else {
+      rangesHtml = `<div class="time-range"><input type="time" name="schedule[${dayIdx}][start][]" value="09:00" disabled required> <span>-</span> <input type="time" name="schedule[${dayIdx}][end][]" value="17:00" disabled required><button type="button" class="danger outline remove-range" style="padding:4px 8px; border:none;" title="Remove">✕</button></div>`;
+    }
+
+    return `
+      <div class="schedule-day ${isActive ? '' : 'disabled'}" id="day-row-${dayIdx}">
+        <div class="day-toggle">
+          <input type="checkbox" class="toggle-day-cb" data-day="${dayIdx}" id="toggle-${dayIdx}" ${isActive ? 'checked' : ''}>
+          <label for="toggle-${dayIdx}">${dayName}</label>
+        </div>
+        <div class="time-ranges" id="ranges-${dayIdx}" style="${isActive ? '' : 'display:none;'}">
+          <div class="ranges-container" id="container-${dayIdx}">${rangesHtml}</div>
+          <div style="margin-top: 8px; display: flex; gap: 8px;">
+            <button type="button" class="outline add-range-btn" data-day="${dayIdx}" style="padding: 4px 8px; font-size: 12px;">+ Add Hours</button>
+            <button type="button" class="outline copy-btn" data-day="${dayIdx}" style="padding: 4px 8px; font-size: 12px;">Copy to All</button>
+          </div>
+        </div>
+        <div class="unavailable-text" id="unavail-${dayIdx}" style="${isActive ? 'display:none;' : 'margin-top:4px; font-size: 14px; color: var(--text-secondary);'}">
+          Unavailable
+        </div>
+      </div>
+    `;
+  }).join('') + `</div>`;
 
   const overrideSection = isEdit ? overridesHtml(token, profile, overrides || []) : '';
 
@@ -207,11 +234,11 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
 
         <fieldset>
           <legend>Calendar Integration</legend>
-          <label>
-            Write Calendar
-            <select name="write_calendar_id">${writeCalendarOptions}</select>
-            <small style="color: var(--text-secondary);">Calendar where bookings will be created</small>
-          </label>
+          <label style="display: block; font-weight: 600;">Write Calendars</label>
+          <small style="color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Calendars where bookings will be created</small>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            ${writeCalendarCheckboxes || '<p style="color: var(--text-secondary);">No calendar connections available.</p>'}
+          </div>
 
           <label style="margin-top: 1rem; display: block; font-weight: 600;">Read Calendars (for availability)</label>
           <div style="display: flex; flex-direction: column; gap: 0.5rem;">
@@ -236,6 +263,91 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
       </form>
     </div>
     ${overrideSection}
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        // Toggle Day Availability
+        document.querySelectorAll('.toggle-day-cb').forEach(cb => {
+          cb.addEventListener('change', (e) => {
+            const day = e.target.dataset.day;
+            const row = document.getElementById('day-row-' + day);
+            const rangesDiv = document.getElementById('ranges-' + day);
+            const unavailText = document.getElementById('unavail-' + day);
+            
+            if (e.target.checked) {
+              row.classList.remove('disabled');
+              rangesDiv.style.display = 'block';
+              unavailText.style.display = 'none';
+              rangesDiv.querySelectorAll('input').forEach(inp => inp.disabled = false);
+            } else {
+              row.classList.add('disabled');
+              rangesDiv.style.display = 'none';
+              unavailText.style.display = 'block';
+              rangesDiv.querySelectorAll('input').forEach(inp => inp.disabled = true);
+            }
+          });
+        });
+
+        // Remove Range
+        document.addEventListener('click', (e) => {
+          if (e.target.classList.contains('remove-range')) {
+            const timeRange = e.target.closest('.time-range');
+            const container = timeRange.parentElement;
+            timeRange.remove();
+            
+            if (container.children.length === 0) {
+              const day = container.id.replace('container-', '');
+              const cb = document.getElementById('toggle-' + day);
+              if (cb) {
+                cb.checked = false;
+                cb.dispatchEvent(new Event('change'));
+                container.innerHTML = \`<div class="time-range"><input type="time" name="schedule[\${day}][start][]" value="09:00" disabled required> <span>-</span> <input type="time" name="schedule[\${day}][end][]" value="17:00" disabled required><button type="button" class="danger outline remove-range" style="padding:4px 8px; border:none;" title="Remove">✕</button></div>\`;
+              }
+            }
+          }
+        });
+
+        // Add Range
+        document.querySelectorAll('.add-range-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const day = e.target.dataset.day;
+            const container = document.getElementById('container-' + day);
+            const div = document.createElement('div');
+            div.className = 'time-range';
+            div.innerHTML = \`<input type="time" name="schedule[\${day}][start][]" value="09:00" required> <span>-</span> <input type="time" name="schedule[\${day}][end][]" value="17:00" required><button type="button" class="danger outline remove-range" style="padding:4px 8px; border:none;" title="Remove">✕</button>\`;
+            container.appendChild(div);
+          });
+        });
+
+        // Copy to All
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const sourceDay = e.target.dataset.day;
+            const sourceContainer = document.getElementById('container-' + sourceDay);
+            const sourceInputs = Array.from(sourceContainer.querySelectorAll('.time-range')).map(tr => {
+              const start = tr.querySelector('input[name*="[start]"]').value;
+              const end = tr.querySelector('input[name*="[end]"]').value;
+              return {start, end};
+            });
+
+            for (let i = 0; i <= 6; i++) {
+              if (i == sourceDay) continue; 
+              const cb = document.getElementById('toggle-' + i);
+              cb.checked = true;
+              cb.dispatchEvent(new Event('change'));
+              
+              const container = document.getElementById('container-' + i);
+              container.innerHTML = sourceInputs.map(val => 
+                \`<div class="time-range"><input type="time" name="schedule[\${i}][start][]" value="\${val.start}" required> <span>-</span> <input type="time" name="schedule[\${i}][end][]" value="\${val.end}" required><button type="button" class="danger outline remove-range" style="padding:4px 8px; border:none;" title="Remove">✕</button></div>\`
+              ).join('');
+            }
+            
+            const originalText = e.target.textContent;
+            e.target.textContent = 'Copied!';
+            setTimeout(() => { e.target.textContent = originalText; }, 2000);
+          });
+        });
+      });
+    </script>
   `;
 }
 
@@ -319,7 +431,7 @@ function registerProfileRoutes(app) {
   });
 
   app.post('/profiles', { preHandler: app.csrfProtection }, async (request, reply) => {
-    const { slug, name, meeting_link_url, meeting_tool, write_calendar_id } = request.body || {};
+    const { slug, name, meeting_link_url, meeting_tool } = request.body || {};
 
     if (!slug || !SLUG_REGEX.test(slug)) {
       const token = reply.generateCsrf();
@@ -338,7 +450,7 @@ function registerProfileRoutes(app) {
 
     const result = app.db.prepare(
       "INSERT INTO booking_profiles (slug, name, is_active, write_calendar_id, meeting_link_url, meeting_tool, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)"
-    ).run(slug, name, write_calendar_id || null, meeting_link_url || null, meeting_tool || null, new Date().toISOString());
+    ).run(slug, name, null, meeting_link_url || null, meeting_tool || null, new Date().toISOString());
 
     const profileId = result.lastInsertRowid;
 
@@ -364,6 +476,15 @@ function registerProfileRoutes(app) {
       }
     }
 
+    const writeCalIds = request.body['write_calendar_ids[]'];
+    if (writeCalIds) {
+      const wIds = Array.isArray(writeCalIds) ? writeCalIds : [writeCalIds];
+      const insertWrite = app.db.prepare("INSERT INTO profile_write_calendars (profile_id, calendar_connection_id) VALUES (?, ?)");
+      for (const cid of wIds) {
+        insertWrite.run(profileId, Number(cid));
+      }
+    }
+
     return reply.redirect('/admin/profiles');
   });
 
@@ -379,10 +500,11 @@ function registerProfileRoutes(app) {
     const attendees = app.db.prepare("SELECT email FROM default_attendees WHERE profile_id = ?").all(profile.id).map(a => a.email);
     const templates = app.db.prepare("SELECT * FROM schedule_templates WHERE profile_id = ? ORDER BY day_of_week, start_time").all(profile.id);
     const readCalendarIds = app.db.prepare("SELECT calendar_connection_id FROM profile_read_calendars WHERE profile_id = ?").all(profile.id).map(r => r.calendar_connection_id);
+    const writeCalendarIds = app.db.prepare("SELECT calendar_connection_id FROM profile_write_calendars WHERE profile_id = ?").all(profile.id).map(r => r.calendar_connection_id);
     const overrides = app.db.prepare("SELECT * FROM schedule_overrides WHERE profile_id = ? ORDER BY date").all(profile.id);
     const adminTimezone = process.env.ADMIN_TIMEZONE || 'UTC';
 
-    const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, null, overrides, adminTimezone);
+    const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds, writeCalendarIds }, null, overrides, adminTimezone);
     reply.type('text/html').send(require('./app').BASE_LAYOUT('Edit Profile', html));
   });
 
@@ -393,7 +515,7 @@ function registerProfileRoutes(app) {
       return reply.code(404).type('text/html').send(require('./app').BASE_LAYOUT('Not Found', '<h1>Profile not found</h1>'));
     }
 
-    const { slug, name, meeting_link_url, meeting_tool, write_calendar_id } = request.body || {};
+    const { slug, name, meeting_link_url, meeting_tool } = request.body || {};
 
     if (!slug || !SLUG_REGEX.test(slug)) {
       const token = reply.generateCsrf();
@@ -416,7 +538,7 @@ function registerProfileRoutes(app) {
 
     app.db.prepare(
       "UPDATE booking_profiles SET slug = ?, name = ?, write_calendar_id = ?, meeting_link_url = ?, meeting_tool = ? WHERE id = ?"
-    ).run(slug, name, write_calendar_id || null, meeting_link_url || null, meeting_tool || null, id);
+    ).run(slug, name, null, meeting_link_url || null, meeting_tool || null, id);
 
     // Replace attendees
     app.db.prepare("DELETE FROM default_attendees WHERE profile_id = ?").run(id);
@@ -443,6 +565,17 @@ function registerProfileRoutes(app) {
       const insertRead = app.db.prepare("INSERT INTO profile_read_calendars (profile_id, calendar_connection_id) VALUES (?, ?)");
       for (const cid of ids) {
         insertRead.run(id, Number(cid));
+      }
+    }
+
+    // Replace write calendars
+    app.db.prepare("DELETE FROM profile_write_calendars WHERE profile_id = ?").run(id);
+    const writeCalIds = request.body['write_calendar_ids[]'];
+    if (writeCalIds) {
+      const wIds = Array.isArray(writeCalIds) ? writeCalIds : [writeCalIds];
+      const insertWrite = app.db.prepare("INSERT INTO profile_write_calendars (profile_id, calendar_connection_id) VALUES (?, ?)");
+      for (const cid of wIds) {
+        insertWrite.run(id, Number(cid));
       }
     }
 

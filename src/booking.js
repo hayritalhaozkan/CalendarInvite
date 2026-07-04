@@ -587,7 +587,10 @@ async function createCalendarEvent(fetchFn, db, encryptionKey, connection, event
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(event),
     });
-    if (!response.ok) throw new Error('Google event creation failed');
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Google event creation failed: ${errText}`);
+    }
     const data = await response.json();
     return data.id;
   } else if (connection.provider === 'microsoft') {
@@ -727,20 +730,33 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
     }
     eventDescription += (eventDescription ? '\n\n' : '') + `Cancel this booking: /cancel/${cancellationToken}`;
 
-    // Create calendar event if write calendar is configured
-    let calendarEventId = null;
-    if (profile.write_calendar_id) {
-      const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(profile.write_calendar_id);
-      if (connection) {
-        calendarEventId = await createCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, {
+    // Create calendar events if write calendars are configured
+    const writeCalendars = app.db.prepare(
+      "SELECT c.* FROM calendar_connections c JOIN profile_write_calendars p ON c.id = p.calendar_connection_id WHERE p.profile_id = ? AND c.status = 'connected'"
+    ).all(profile.id);
+
+    // Fallback to legacy column just in case
+    if (writeCalendars.length === 0 && profile.write_calendar_id) {
+      const fallback = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(profile.write_calendar_id);
+      if (fallback) writeCalendars.push(fallback);
+    }
+
+    const createdEvents = [];
+    for (const connection of writeCalendars) {
+      try {
+        const evId = await createCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, {
           title: bookingTitle,
           description: eventDescription,
           start: startDate.toISOString(),
           end: endDate.toISOString(),
           attendees: allAttendees,
         });
+        if (evId) createdEvents.push({ connectionId: connection.id, eventId: evId });
+      } catch (err) {
+        app.log.error(`Failed to create event on connection ${connection.id}: ${err.message}`);
       }
     }
+    const calendarEventIdStr = createdEvents.length > 0 ? JSON.stringify(createdEvents) : null;
 
     // Store booking
     app.db.prepare(
@@ -757,7 +773,7 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
       durationMinutes,
       cancellationToken,
       'confirmed',
-      calendarEventId,
+      calendarEventIdStr,
       new Date().toISOString()
     );
 
@@ -774,7 +790,7 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
         booker_email: email.trim(),
         additional_attendees: additional_attendees || [],
         cancellation_token: cancellationToken,
-        calendar_event_id: calendarEventId,
+        calendar_event_id: calendarEventIdStr,
         meeting_link: profile.meeting_link_url || undefined,
         attendees: allAttendees,
       },
@@ -883,14 +899,27 @@ function registerCancellationApi(app, { encryptionKey }) {
       return reply.code(400).send({ error: 'This booking has already been cancelled' });
     }
 
-    // Attempt to delete calendar event
-    if (booking.calendar_event_id && booking.write_calendar_id) {
-      const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
-      if (connection) {
-        try {
-          await deleteCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, booking.calendar_event_id);
-        } catch {
-          // If calendar API fails, still proceed with local cancellation
+    // Attempt to delete calendar events
+    if (booking.calendar_event_id) {
+      try {
+        const events = JSON.parse(booking.calendar_event_id);
+        for (const ev of events) {
+          const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(ev.connectionId);
+          if (connection) {
+            try {
+              await deleteCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, ev.eventId);
+            } catch {
+              // Ignore individual delete failures
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback for legacy single string ID
+        if (booking.write_calendar_id) {
+          const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
+          if (connection) {
+            try { await deleteCalendarEvent(app.fetchFn, app.db, encryptionKey, connection, booking.calendar_event_id); } catch {}
+          }
         }
       }
     }

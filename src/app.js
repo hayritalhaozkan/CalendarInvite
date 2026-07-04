@@ -284,7 +284,7 @@ function buildApp(opts = {}) {
 
       }).join('');
 
-      const pagination = totalPages > 1 ? `<nav><ul>${Array.from({length: totalPages}, (_, i) => {
+      const pagination = totalPages > 1 ? `<nav><ul>${Array.from({ length: totalPages }, (_, i) => {
         const p = i + 1;
         const qs = new URLSearchParams();
         if (status) qs.set('status', status);
@@ -336,40 +336,34 @@ function buildApp(opts = {}) {
         return reply.code(400).type('text/html').send(BASE_LAYOUT('Error', '<h1>Booking already cancelled</h1>'));
       }
 
-      if (booking.calendar_event_id && booking.write_calendar_id) {
-        const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
-        if (connection) {
+      if (booking.calendar_event_id) {
+        const deleteEv = async (connection, eventId) => {
           try {
             let accessToken;
-            try {
-              accessToken = decrypt(connection.encrypted_access_token, encryptionKey);
-            } catch {
-              accessToken = connection.encrypted_access_token;
-            }
-
+            try { accessToken = decrypt(connection.encrypted_access_token, encryptionKey); } catch { accessToken = connection.encrypted_access_token; }
             if (connection.provider === 'google') {
-              await app.fetchFn(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${booking.calendar_event_id}?sendUpdates=all`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${accessToken}` },
-              });
+              await app.fetchFn(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
             } else if (connection.provider === 'microsoft') {
-              await app.fetchFn(`https://graph.microsoft.com/v1.0/me/events/${booking.calendar_event_id}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${accessToken}` },
-              });
+              await app.fetchFn(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
             } else if (connection.provider === 'zoho') {
-              const calendarsResponse = await app.fetchFn('https://calendar.zoho.com/api/v1/calendars', {
-                headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
-              });
+              const calendarsResponse = await app.fetchFn('https://calendar.zoho.com/api/v1/calendars', { headers: { Authorization: `Zoho-oauthtoken ${accessToken}` } });
               const calendarsData = await calendarsResponse.json();
               const primaryCalendar = calendarsData.calendars.find(c => c.isprimary) || calendarsData.calendars[0];
-              await app.fetchFn(`https://calendar.zoho.com/api/v1/calendars/${primaryCalendar.uid}/events/${booking.calendar_event_id}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
-              });
+              await app.fetchFn(`https://calendar.zoho.com/api/v1/calendars/${primaryCalendar.uid}/events/${eventId}`, { method: 'DELETE', headers: { Authorization: `Zoho-oauthtoken ${accessToken}` } });
             }
-          } catch {
-            // Log but continue with cancellation
+          } catch { }
+        };
+
+        try {
+          const events = JSON.parse(booking.calendar_event_id);
+          for (const ev of events) {
+            const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(ev.connectionId);
+            if (connection) await deleteEv(connection, ev.eventId);
+          }
+        } catch (err) {
+          if (booking.write_calendar_id) {
+            const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
+            if (connection) await deleteEv(connection, booking.calendar_event_id);
           }
         }
       }
@@ -386,9 +380,15 @@ function buildApp(opts = {}) {
     app.get('/calendars', async (request, reply) => {
       const connections = app.db.prepare('SELECT * FROM calendar_connections').all();
       const token = reply.generateCsrf();
+      const icons = {
+        google: `<svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>`,
+        microsoft: `<svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M1.15 1.15h10.27v10.27H1.15z" fill="#f25022"/><path d="M12.58 1.15h10.27v10.27H12.58z" fill="#7fba00"/><path d="M1.15 12.58h10.27v10.27H1.15z" fill="#00a4ef"/><path d="M12.58 12.58h10.27v10.27H12.58z" fill="#ffb900"/></svg>`,
+        zoho: `<svg width="18" height="18" viewBox="0 0 24 24" fill="#E31A2D" xmlns="http://www.w3.org/2000/svg"><path d="M23.111 21.054a1.862 1.862 0 1 1 0 3.725 1.862 1.862 0 0 1 0-3.725ZM7.587 3.551a3.551 3.551 0 1 1 0 7.102 3.551 3.551 0 0 1 0-7.102Zm7.564 3.726c1.614 0 2.923.637 2.923 1.956v3.744h.79a1.002 1.002 0 0 0 .977-1.196L18.423.856a.992.992 0 0 0-.964-.856H3.344a.99.99 0 0 0-.982 1.13l.872 6.071c.07.494.512.8711 1.012.8711h9.905v.2c0 .548-.567 1.002-1.282 1.002H7.669c-2.316 0-4.195-1.554-4.195-3.473V4.945C3.474 2.213 5.342 0 7.644 0h11.233L20.89 13.999a2.981 2.981 0 0 1-2.909 3.578h-.572a.992.992 0 0 0-.992.993v2.858c0 .548-.574 1.002-1.282 1.002H9.083l-4.526 2.45a2.155 2.155 0 0 1-1.026.257H1.587a.991.991 0 0 1-.991-.991v-2.072c0-1.874 1.83-3.41 4.103-3.41h10.453v.19c0-1.309-1.309-1.946-2.923-1.946h-3.486A5.513 5.513 0 0 1 3.474 11.29V8.657a.992.992 0 0 1 .992-.992h10.685Zm-7.564.846a.735.735 0 1 0 0 1.47.735.735 0 0 0 0-1.47Z"/></svg>`
+      };
+
       const connectionRows = connections.map(c => `
         <tr>
-          <td>${escapeHtml(c.provider)}</td>
+          <td><div style="display:flex;align-items:center;gap:8px;">${icons[c.provider] || ''} ${escapeHtml(c.provider)}</div></td>
           <td>${escapeHtml(c.email || '')}</td>
           <td>${escapeHtml(c.status)}</td>
           <td>
@@ -405,9 +405,9 @@ function buildApp(opts = {}) {
       const msConfigured = !!msClientId;
       const zohoConfigured = !!(zohoClientId && zohoClientSecret && zohoRedirectUri);
 
-      const connectBtn = (href, label, configured) => configured
-        ? `<a href="${href}" role="button">${label}</a>`
-        : `<a role="button" class="secondary" aria-disabled="true" style="pointer-events:none;opacity:0.5" title="Not configured">${label}</a>`;
+      const connectBtn = (href, label, svg, configured) => configured
+        ? `<a href="${href}" role="button" class="outline" style="display:inline-flex;align-items:center;gap:8px;background:var(--neutral-0);">${svg} ${label}</a>`
+        : `<a role="button" class="secondary outline" aria-disabled="true" style="pointer-events:none;opacity:0.5;display:inline-flex;align-items:center;gap:8px;background:var(--neutral-0);" title="Not configured">${svg} ${label}</a>`;
 
       const missingVars = [];
       if (!googleConfigured) missingVars.push('Google (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)');
@@ -428,9 +428,9 @@ function buildApp(opts = {}) {
         <h1>Calendar Connections</h1>
         ${configNotice}
         <div class="card" style="display: flex; gap: 1rem; flex-wrap: wrap;">
-          ${connectBtn('/admin/calendars/connect/google', '🟢 Connect Google Calendar', googleConfigured)}
-          ${connectBtn('/admin/calendars/connect/microsoft', '🔵 Connect Office 365 Calendar', msConfigured)}
-          ${connectBtn('/admin/calendars/connect/zoho', '🟠 Connect Zoho Calendar', zohoConfigured)}
+          ${connectBtn('/admin/calendars/connect/google', 'Connect Google Calendar', icons.google, googleConfigured)}
+          ${connectBtn('/admin/calendars/connect/microsoft', 'Connect Office 365 Calendar', icons.microsoft, msConfigured)}
+          ${connectBtn('/admin/calendars/connect/zoho', 'Connect Zoho Calendar', icons.zoho, zohoConfigured)}
         </div>
         ${connections.length ? `
           <table>
@@ -622,6 +622,8 @@ function buildApp(opts = {}) {
 
     app.post('/calendars/:id/disconnect', { preHandler: app.csrfProtection }, async (request, reply) => {
       const { id } = request.params;
+      // Remove legacy references to prevent FOREIGN KEY constraint failures
+      app.db.prepare("UPDATE booking_profiles SET write_calendar_id = NULL WHERE write_calendar_id = ?").run(id);
       app.db.prepare('DELETE FROM calendar_connections WHERE id = ?').run(id);
       return reply.redirect('/admin/calendars');
     });

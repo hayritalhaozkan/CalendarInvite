@@ -38,6 +38,13 @@ function initializeSchema(db) {
       PRIMARY KEY (profile_id, calendar_connection_id)
     );
 
+    CREATE TABLE IF NOT EXISTS profile_write_calendars (
+      profile_id INTEGER NOT NULL REFERENCES booking_profiles(id) ON DELETE CASCADE,
+      calendar_connection_id INTEGER NOT NULL REFERENCES calendar_connections(id) ON DELETE CASCADE,
+      PRIMARY KEY (profile_id, calendar_connection_id)
+    );
+
+
     CREATE TABLE IF NOT EXISTS default_attendees (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       profile_id INTEGER NOT NULL REFERENCES booking_profiles(id) ON DELETE CASCADE,
