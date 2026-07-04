@@ -252,10 +252,12 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
           </section>
           <section id="calendar-step" style="display:none">
             <h2>Select a Date</h2>
+            <div id="calendar-header"></div>
             <div id="calendar-grid"></div>
           </section>
           <section id="slots-step" style="display:none">
             <h2>Available Times</h2>
+            <p id="selected-date-title" style="color: var(--text-secondary); margin-bottom: 1.5rem; font-weight: 500; text-align: center;"></p>
             <div id="time-slots"></div>
           </section>
           <section id="form-step" style="display:none">
@@ -315,42 +317,121 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
             });
           });
 
+          function formatDateToYYYYMMDD(date) {
+            var year = date.getFullYear();
+            var month = String(date.getMonth() + 1).padStart(2, '0');
+            var day = String(date.getDate()).padStart(2, '0');
+            return year + '-' + month + '-' + day;
+          }
+
+          var currentMonth = new Date();
+          currentMonth.setHours(0,0,0,0);
+          currentMonth.setDate(1);
+
+          var today = new Date();
+          today.setHours(0,0,0,0);
+
           function renderCalendar() {
-            var now = new Date();
             var grid = document.getElementById('calendar-grid');
+            var header = document.getElementById('calendar-header');
+
+            var monthYear = currentMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+            header.innerHTML = '<button id="prev-month" class="outline calendar-nav">&larr;</button><span class="calendar-month-title">' + monthYear + '</span><button id="next-month" class="outline calendar-nav">&rarr;</button>';
+
+            document.getElementById('prev-month').addEventListener('click', function() {
+              currentMonth.setMonth(currentMonth.getMonth() - 1);
+              renderCalendar();
+            });
+
+            document.getElementById('next-month').addEventListener('click', function() {
+              currentMonth.setMonth(currentMonth.getMonth() + 1);
+              renderCalendar();
+            });
+
             grid.innerHTML = '';
-            var horizon = new Date(now.getTime() + 4 * 7 * 24 * 60 * 60 * 1000);
-            var d = new Date(now);
-            d.setHours(0,0,0,0);
-            while (d < horizon) {
-              var dateStr = d.toISOString().split('T')[0];
+
+            var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            dayNames.forEach(function(name) {
+              var dayHeader = document.createElement('div');
+              dayHeader.className = 'calendar-day-header';
+              dayHeader.textContent = name;
+              grid.appendChild(dayHeader);
+            });
+
+            var firstDay = new Date(currentMonth);
+            var lastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+
+            var startDay = firstDay.getDay();
+            for (var i = 0; i < startDay; i++) {
+              var emptyCell = document.createElement('div');
+              emptyCell.className = 'calendar-day-empty';
+              grid.appendChild(emptyCell);
+            }
+
+            var horizon = new Date();
+            horizon.setHours(0,0,0,0);
+            horizon.setDate(horizon.getDate() + 90);
+
+            for (var day = 1; day <= lastDay.getDate(); day++) {
+              var d = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+              var dateStr = formatDateToYYYYMMDD(d);
               var btn = document.createElement('button');
-              btn.textContent = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-              btn.className = 'outline';
-              (function(ds) {
-                btn.addEventListener('click', function() { loadSlots(ds); });
-              })(dateStr);
+              btn.textContent = day;
+              btn.className = 'calendar-day';
+
+              var isPast = d < today;
+              var isFuture = d > horizon;
+              var isToday = d.getTime() === today.getTime();
+
+              if (isPast || isFuture) {
+                btn.className += ' calendar-day-disabled';
+                btn.disabled = true;
+              } else {
+                if (isToday) {
+                  btn.className += ' calendar-day-today';
+                }
+                (function(ds) {
+                  btn.addEventListener('click', function() { loadSlots(ds); });
+                })(dateStr);
+              }
+
               grid.appendChild(btn);
-              d.setDate(d.getDate() + 1);
             }
           }
 
+          var selectedDate = null;
+
           function loadSlots(dateStr) {
+            selectedDate = dateStr;
             document.getElementById('slots-step').style.display = '';
             document.getElementById('form-step').style.display = 'none';
+
+            var d = new Date(dateStr + 'T00:00:00Z');
+            var dateDisplay = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+            document.getElementById('selected-date-title').textContent = dateDisplay;
+
             var container = document.getElementById('time-slots');
-            container.innerHTML = '<p class="loading" style="text-align:center;color:var(--text-secondary);">Loading available times...</p>';
+            container.innerHTML = '<div class="empty-state-message"><p class="loading">Loading available times...</p></div>';
             fetch('/api/book/' + slug + '/slots?date=' + dateStr + '&duration=' + selectedDuration + '&timezone=' + tz)
               .then(function(res) { return res.json(); })
               .then(function(data) {
+                console.log('API Response:', data);
+                console.log('Timezone:', tz);
+                console.log('Total slots:', data.slots.length);
+
                 if (!data.slots.length) {
-                  container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);">No available times for this date. Please try another date.</p>';
+                  container.innerHTML = '<div class="empty-state-message"><p class="empty-state-title">No Available Times</p><p class="empty-state-description">This date is fully booked. Please select another date from the calendar.</p></div>';
                   return;
                 }
-                container.innerHTML = data.slots.map(function(s) {
+
+                var renderedSlots = data.slots.map(function(s) {
                   var t = new Date(s.start).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: tz });
+                  console.log('Slot:', s.start, '→ Rendered:', t);
                   return '<button class="slot-btn outline" data-start="' + s.start + '">' + t + '</button>';
-                }).join('');
+                });
+
+                console.log('Rendered', renderedSlots.length, 'slot buttons');
+                container.innerHTML = renderedSlots.join('');
                 container.querySelectorAll('.slot-btn').forEach(function(btn) {
                   btn.addEventListener('click', function() {
                     document.querySelectorAll('.slot-btn').forEach(function(b) { b.classList.remove('contrast'); b.classList.add('outline'); });
@@ -364,7 +445,7 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
                 });
               })
               .catch(function(err) {
-                container.innerHTML = '<p style="text-align:center;color:var(--error);">Failed to load available times. Please try again.</p>';
+                container.innerHTML = '<div class="empty-state-message error"><p class="empty-state-title">Connection Error</p><p class="empty-state-description">Failed to load available times. Please check your connection and try again.</p></div>';
               });
           }
 
