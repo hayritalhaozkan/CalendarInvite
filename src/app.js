@@ -165,11 +165,20 @@ function buildApp(opts = {}) {
     });
 
     app.addHook('preHandler', async (request, reply) => {
-      if (request.url === '/admin/login') return;
+      // Skip auth for login page and OAuth callback routes
+      const publicPaths = [
+        '/admin/login',
+        '/admin/calendars/callback/google',
+        '/admin/calendars/callback/microsoft',
+        '/admin/calendars/zoho/callback',
+      ];
+      const urlPath = request.url.split('?')[0]; // strip query string
+      if (publicPaths.includes(urlPath)) return;
       if (!request.session.get('adminId')) {
         return reply.redirect('/admin/login');
       }
     });
+
 
     app.get('/dashboard', async (request, reply) => {
       const token = reply.generateCsrf();
