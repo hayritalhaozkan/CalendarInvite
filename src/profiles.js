@@ -7,7 +7,39 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function parseScheduleFromBody(body) {
+function convertUTCToLocalTime(utcTimeStr, adminTimezone) {
+  if (!utcTimeStr || utcTimeStr.length === 0) return utcTimeStr;
+
+  const [hours, minutes] = utcTimeStr.split(':').map(Number);
+
+  // Create UTC date
+  const now = new Date();
+  const utcDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0));
+
+  // Convert to local time
+  const localHours = String(utcDate.getHours()).padStart(2, '0');
+  const localMinutes = String(utcDate.getMinutes()).padStart(2, '0');
+
+  return `${localHours}:${localMinutes}`;
+}
+
+function convertTimeToUTC(timeStr, adminTimezone) {
+  if (!timeStr || timeStr.length === 0) return timeStr;
+
+  const [hours, minutes] = timeStr.split(':').map(Number);
+
+  // Create a date in admin's timezone
+  const now = new Date();
+  const localDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+
+  // Get UTC time string
+  const utcHours = String(localDate.getUTCHours()).padStart(2, '0');
+  const utcMinutes = String(localDate.getUTCMinutes()).padStart(2, '0');
+
+  return `${utcHours}:${utcMinutes}`;
+}
+
+function parseScheduleFromBody(body, adminTimezone = 'UTC') {
   const entries = [];
   for (let day = 0; day <= 6; day++) {
     const key = `schedule[${day}]`;
@@ -20,7 +52,9 @@ function parseScheduleFromBody(body) {
 
     for (let i = 0; i < startArr.length; i++) {
       if (startArr[i] && endArr[i]) {
-        entries.push({ day_of_week: day, start_time: startArr[i], end_time: endArr[i] });
+        const utcStart = convertTimeToUTC(startArr[i], adminTimezone);
+        const utcEnd = convertTimeToUTC(endArr[i], adminTimezone);
+        entries.push({ day_of_week: day, start_time: utcStart, end_time: utcEnd });
       }
     }
   }
@@ -85,7 +119,7 @@ function overridesHtml(token, profile, overrides) {
   `;
 }
 
-function profileFormHtml(token, profile, calendars, attendees, schedules, error, overrides) {
+function profileFormHtml(token, profile, calendars, attendees, schedules, error, overrides, adminTimezone = 'UTC') {
   const isEdit = !!profile;
   const action = isEdit ? `/admin/profiles/${profile.id}` : '/admin/profiles';
   const title = isEdit ? 'Edit Profile' : 'New Profile';
@@ -113,7 +147,11 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
   const scheduleHtml = DAYS.map((dayName, dayIdx) => {
     const daySchedules = (schedules.templates || []).filter(s => s.day_of_week === dayIdx);
     const ranges = daySchedules.length > 0
-      ? daySchedules.map(s => `<div><input type="time" name="schedule[${dayIdx}][start][]" value="${s.start_time}"> - <input type="time" name="schedule[${dayIdx}][end][]" value="${s.end_time}"></div>`).join('')
+      ? daySchedules.map(s => {
+          const localStart = convertUTCToLocalTime(s.start_time, adminTimezone);
+          const localEnd = convertUTCToLocalTime(s.end_time, adminTimezone);
+          return `<div><input type="time" name="schedule[${dayIdx}][start][]" value="${localStart}"> - <input type="time" name="schedule[${dayIdx}][end][]" value="${localEnd}"></div>`;
+        }).join('')
       : `<div><input type="time" name="schedule[${dayIdx}][start][]" value=""> - <input type="time" name="schedule[${dayIdx}][end][]" value=""></div>`;
     return `<fieldset><legend>${dayName}</legend>${ranges}</fieldset>`;
   }).join('');
@@ -203,17 +241,26 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
 function registerProfileRoutes(app) {
   app.get('/profiles', async (request, reply) => {
     const profiles = app.db.prepare("SELECT * FROM booking_profiles ORDER BY created_at DESC").all();
-    const rows = profiles.map(p => `
+    const baseUrl = `${request.protocol}://${request.hostname}${request.port && request.port !== 80 && request.port !== 443 ? ':' + request.port : ''}`;
+
+    const rows = profiles.map(p => {
+      const bookingUrl = `${baseUrl}/book/${escapeHtml(p.slug)}`;
+      return `
       <tr>
         <td><code>${escapeHtml(p.slug)}</code></td>
         <td>${escapeHtml(p.name)}</td>
         <td><span class="badge ${p.is_active ? 'success' : 'error'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td class="booking-link-cell">
+          <div class="booking-link-container">
+            <a href="${bookingUrl}" target="_blank" class="booking-link" title="Open booking page in new tab">${bookingUrl}</a>
+            <button class="copy-link-btn outline" data-url="${bookingUrl}">Copy</button>
+          </div>
+        </td>
         <td>
           <a href="/admin/profiles/${p.id}/edit" role="button" class="outline" style="padding: 4px 12px; margin: 0;">Edit</a>
-          <a href="/book/${escapeHtml(p.slug)}" target="_blank" role="button" class="secondary outline" style="padding: 4px 12px; margin: 0 0 0 8px;">View Page</a>
         </td>
       </tr>
-    `).join('');
+    `}).join('');
 
     const html = `
       <nav>
@@ -229,9 +276,34 @@ function registerProfileRoutes(app) {
       </div>
       ${profiles.length ? `
         <table>
-          <thead><tr><th>Slug</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Slug</th><th>Name</th><th>Status</th><th>Booking Link</th><th>Actions</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        <script>
+          document.querySelectorAll('.copy-link-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var url = btn.dataset.url;
+              navigator.clipboard.writeText(url).then(function() {
+                var originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.style.background = 'var(--success)';
+                btn.style.color = 'var(--neutral-0)';
+                btn.style.borderColor = 'var(--success)';
+                setTimeout(function() {
+                  btn.textContent = originalText;
+                  btn.style.background = '';
+                  btn.style.color = '';
+                  btn.style.borderColor = '';
+                }, 2000);
+              }).catch(function() {
+                btn.textContent = 'Failed';
+                setTimeout(function() {
+                  btn.textContent = 'Copy';
+                }, 2000);
+              });
+            });
+          });
+        </script>
       ` : '<article><p>No profiles yet. Create your first booking profile to get started.</p><a href="/admin/profiles/new" role="button">Create Profile</a></article>'}
     `;
     reply.type('text/html').send(require('./app').BASE_LAYOUT('Profiles', html));
@@ -240,7 +312,8 @@ function registerProfileRoutes(app) {
   app.get('/profiles/new', async (request, reply) => {
     const token = reply.generateCsrf();
     const calendars = app.db.prepare("SELECT * FROM calendar_connections WHERE status = 'connected'").all();
-    const html = profileFormHtml(token, null, calendars, [], { templates: [], readCalendarIds: [] }, null);
+    const adminTimezone = process.env.ADMIN_TIMEZONE || 'UTC';
+    const html = profileFormHtml(token, null, calendars, [], { templates: [], readCalendarIds: [] }, null, [], adminTimezone);
     reply.type('text/html').send(require('./app').BASE_LAYOUT('New Profile', html));
   });
 
@@ -274,7 +347,8 @@ function registerProfileRoutes(app) {
       insertAttendee.run(profileId, email);
     }
 
-    const scheduleEntries = parseScheduleFromBody(request.body);
+    const adminTimezone = process.env.ADMIN_TIMEZONE || 'UTC';
+    const scheduleEntries = parseScheduleFromBody(request.body, adminTimezone);
     const insertSchedule = app.db.prepare("INSERT INTO schedule_templates (profile_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?)");
     for (const entry of scheduleEntries) {
       insertSchedule.run(profileId, entry.day_of_week, entry.start_time, entry.end_time);
@@ -305,8 +379,9 @@ function registerProfileRoutes(app) {
     const templates = app.db.prepare("SELECT * FROM schedule_templates WHERE profile_id = ? ORDER BY day_of_week, start_time").all(profile.id);
     const readCalendarIds = app.db.prepare("SELECT calendar_connection_id FROM profile_read_calendars WHERE profile_id = ?").all(profile.id).map(r => r.calendar_connection_id);
     const overrides = app.db.prepare("SELECT * FROM schedule_overrides WHERE profile_id = ? ORDER BY date").all(profile.id);
+    const adminTimezone = process.env.ADMIN_TIMEZONE || 'UTC';
 
-    const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, null, overrides);
+    const html = profileFormHtml(token, profile, calendars, attendees, { templates, readCalendarIds }, null, overrides, adminTimezone);
     reply.type('text/html').send(require('./app').BASE_LAYOUT('Edit Profile', html));
   });
 
@@ -352,7 +427,8 @@ function registerProfileRoutes(app) {
 
     // Replace schedule templates
     app.db.prepare("DELETE FROM schedule_templates WHERE profile_id = ?").run(id);
-    const scheduleEntries = parseScheduleFromBody(request.body);
+    const adminTimezone = process.env.ADMIN_TIMEZONE || 'UTC';
+    const scheduleEntries = parseScheduleFromBody(request.body, adminTimezone);
     const insertSchedule = app.db.prepare("INSERT INTO schedule_templates (profile_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?)");
     for (const entry of scheduleEntries) {
       insertSchedule.run(id, entry.day_of_week, entry.start_time, entry.end_time);
