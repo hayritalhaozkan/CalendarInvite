@@ -83,8 +83,9 @@ function overridesHtml(token, profile, overrides) {
     const deleteBtn = isPast ? '' : `
       <form method="POST" action="/admin/profiles/${profile.id}/overrides/${o.id}/delete" style="display:inline">
         <input type="hidden" name="_csrf" value="${token}">
-        <button type="submit" class="secondary outline">Delete</button>
+        <button type="submit" class="danger">Delete</button>
       </form>`;
+
     return `<tr class="${cssClass}"><td>${escapeHtml(o.date)}</td><td>${typeLabel}</td><td>${rangesDisplay}</td><td>${deleteBtn}</td></tr>`;
   }).join('');
 

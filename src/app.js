@@ -278,9 +278,10 @@ function buildApp(opts = {}) {
           ? '<span class="badge error">Cancelled</span>'
           : '<span class="badge success">Confirmed</span>';
         const cancelBtn = b.status === 'confirmed'
-          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="outline" style="padding:4px 12px;margin:0">Cancel</button></form>`
+          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="danger">Cancel</button></form>`
           : '';
-        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes} min</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td>${cancelBtn}</td></tr>`;
+        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes} min</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td class="actions-cell">${cancelBtn}</td></tr>`;
+
       }).join('');
 
       const pagination = totalPages > 1 ? `<nav><ul>${Array.from({length: totalPages}, (_, i) => {
@@ -393,7 +394,7 @@ function buildApp(opts = {}) {
           <td>
             <form method="POST" action="/admin/calendars/${c.id}/disconnect" style="display:inline">
               <input type="hidden" name="_csrf" value="${token}">
-              <button type="submit" class="secondary outline">Disconnect</button>
+              <button type="submit" class="danger">Disconnect</button>
             </form>
           </td>
         </tr>

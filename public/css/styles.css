@@ -177,6 +177,14 @@ form {
   border: 1px solid var(--border-color);
 }
 
+form[style*="inline"],
+form.inline {
+  background: transparent;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
 label {
   display: block;
   font-size: var(--font-size-sm);
@@ -275,16 +283,32 @@ button.secondary:hover,
 button.outline,
 [role="button"].outline {
   background: transparent;
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  color: var(--neutral-120);
+  border: 1.5px solid var(--neutral-60);
   box-shadow: none;
 }
 
 button.outline:hover,
 [role="button"].outline:hover {
-  background: var(--neutral-10);
+  background: var(--neutral-20);
   border-color: var(--primary);
   color: var(--primary);
+  transform: none;
+}
+
+button.danger,
+[role="button"].danger {
+  background: transparent;
+  color: var(--error);
+  border: 1.5px solid var(--error);
+  box-shadow: none;
+}
+
+button.danger:hover,
+[role="button"].danger:hover {
+  background: var(--error-light);
+  border-color: var(--error);
+  color: var(--error);
   transform: none;
 }
 
@@ -338,6 +362,14 @@ td {
   border-bottom: 1px solid var(--border-color);
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+td.actions-cell {
+  padding: 0;
+  vertical-align: middle;
+  text-align: center;
+  white-space: nowrap;
 }
 
 tbody tr:hover {
@@ -696,6 +728,10 @@ input[type="radio"] {
 
 #booking-form button[type="submit"] {
   margin-top: var(--spacing-lg);
+}
+
+.actions-cell {
+  padding: var(--spacing-xs) var(--spacing-sm) !important;
 }
 
 #confirmation-details {
