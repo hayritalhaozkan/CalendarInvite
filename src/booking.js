@@ -1,5 +1,31 @@
 const crypto = require('node:crypto');
 const { decrypt } = require('./encryption');
+const { refreshAccessToken: refreshGoogleToken } = require('./google');
+const { createMicrosoftClient } = require('./microsoft');
+const { getZohoClient } = require('./zoho');
+
+async function getValidTokenForConnection(db, encryptionKey, connection) {
+  const expiry = new Date(connection.token_expiry || 0);
+  if (expiry > new Date()) {
+    try {
+      return decrypt(connection.encrypted_access_token, encryptionKey);
+    } catch {
+      return connection.encrypted_access_token;
+    }
+  }
+
+  // Token is expired, refresh it
+  if (connection.provider === 'google') {
+    return await refreshGoogleToken(db, encryptionKey, connection.id, process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+  } else if (connection.provider === 'microsoft') {
+    const client = createMicrosoftClient({ db, encryptionKey, clientId: process.env.MICROSOFT_CLIENT_ID, clientSecret: process.env.MICROSOFT_CLIENT_SECRET, tenantId: process.env.MICROSOFT_TENANT_ID || 'common' });
+    return await client.getValidAccessToken(connection.id);
+  } else if (connection.provider === 'zoho') {
+    const client = getZohoClient({ db, encryptionKey, clientId: process.env.ZOHO_CLIENT_ID, clientSecret: process.env.ZOHO_CLIENT_SECRET });
+    return await client.getAccessToken(connection.id);
+  }
+  throw new Error('Unknown provider');
+}
 
 const VALID_DURATIONS = [30, 45, 60];
 const LEAD_TIME_MS = 2 * 60 * 60 * 1000;
@@ -101,12 +127,7 @@ async function getCalendarBusySlots(db, encryptionKey, profileId, dateStr, fetch
 
   for (const cal of readCalendars) {
     try {
-      let accessToken;
-      try {
-        accessToken = decrypt(cal.encrypted_access_token, encryptionKey);
-      } catch {
-        accessToken = cal.encrypted_access_token;
-      }
+      const accessToken = await getValidTokenForConnection(db, encryptionKey, cal);
 
       if (cal.provider === 'google') {
         const response = await fetchFn('https://www.googleapis.com/calendar/v3/freeBusy', {
@@ -567,12 +588,7 @@ function registerSlotsApi(app, { encryptionKey }) {
 }
 
 async function createCalendarEvent(fetchFn, db, encryptionKey, connection, eventData) {
-  let accessToken;
-  try {
-    accessToken = decrypt(connection.encrypted_access_token, encryptionKey);
-  } catch {
-    accessToken = connection.encrypted_access_token;
-  }
+  const accessToken = await getValidTokenForConnection(db, encryptionKey, connection);
 
   if (connection.provider === 'google') {
     const event = {

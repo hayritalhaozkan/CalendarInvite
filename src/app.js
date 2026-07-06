@@ -38,12 +38,36 @@ const BASE_LAYOUT = (title, body) => `<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} - CalendarInvite</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="stylesheet" type="text/css" href="https://npmcdn.com/flatpickr/dist/themes/airbnb.css">
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
   <main class="container">
     ${body}
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script>
+    // Initialize flatpickr on any element with .time-picker class globally
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof flatpickr !== 'undefined') {
+        window.initTimePickers = function() {
+          flatpickr(".time-picker:not(.flatpickr-input)", {
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: "H:i",
+            altInput: true,
+            altFormat: "h:i K",
+            minuteIncrement: 1
+          });
+        };
+        window.initTimePickers();
+      }
+    });
+  </script>
 </body>
 </html>`;
 
@@ -278,9 +302,10 @@ function buildApp(opts = {}) {
           ? '<span class="badge error">Cancelled</span>'
           : '<span class="badge success">Confirmed</span>';
         const cancelBtn = b.status === 'confirmed'
-          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="danger">Cancel</button></form>`
+          ? `<form method="POST" action="/admin/bookings/${b.id}/cancel" style="display:inline"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="warning outline" style="padding: 4px 8px; font-size: 12px; margin-right: 4px;">Cancel</button></form>`
           : '';
-        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes} min</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td class="actions-cell">${cancelBtn}</td></tr>`;
+        const deleteBtn = `<form method="POST" action="/admin/bookings/${b.id}/delete" style="display:inline" onsubmit="return confirm('Are you sure you want to permanently delete this booking?');"><input type="hidden" name="_csrf" value="${token}"><button type="submit" class="danger outline" style="padding: 4px 8px; font-size: 12px;">Delete</button></form>`;
+        return `<tr><td>${escapeHtml(dateStr)}</td><td>${b.duration_minutes} min</td><td>${escapeHtml(b.profile_name)}</td><td>${escapeHtml(b.booker_name)}</td><td>${escapeHtml(b.booker_email)}</td><td>${escapeHtml(b.title)}</td><td>${statusBadge}</td><td class="actions-cell" style="white-space: nowrap;">${cancelBtn}${deleteBtn}</td></tr>`;
 
       }).join('');
 
@@ -369,6 +394,51 @@ function buildApp(opts = {}) {
       }
 
       app.db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(id);
+      return reply.redirect('/admin/bookings');
+    });
+
+    app.post('/bookings/:id/delete', { preHandler: app.csrfProtection }, async (request, reply) => {
+      const { id } = request.params;
+      const booking = app.db.prepare("SELECT b.*, bp.write_calendar_id FROM bookings b JOIN booking_profiles bp ON b.profile_id = bp.id WHERE b.id = ?").get(id);
+
+      if (!booking) {
+        return reply.code(404).type('text/html').send(BASE_LAYOUT('Not Found', '<h1>Booking not found</h1>'));
+      }
+
+      // Try to cancel from calendar provider if it's not already cancelled
+      if (booking.status === 'confirmed' && booking.calendar_event_id) {
+        const deleteEv = async (connection, eventId) => {
+          try {
+            let accessToken;
+            try { accessToken = decrypt(connection.encrypted_access_token, encryptionKey); } catch { accessToken = connection.encrypted_access_token; }
+            if (connection.provider === 'google') {
+              await app.fetchFn(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+            } else if (connection.provider === 'microsoft') {
+              await app.fetchFn(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+            } else if (connection.provider === 'zoho') {
+              const calendarsResponse = await app.fetchFn('https://calendar.zoho.com/api/v1/calendars', { headers: { Authorization: `Zoho-oauthtoken ${accessToken}` } });
+              const calendarsData = await calendarsResponse.json();
+              const primaryCalendar = calendarsData.calendars.find(c => c.isprimary) || calendarsData.calendars[0];
+              await app.fetchFn(`https://calendar.zoho.com/api/v1/calendars/${primaryCalendar.uid}/events/${eventId}`, { method: 'DELETE', headers: { Authorization: `Zoho-oauthtoken ${accessToken}` } });
+            }
+          } catch { }
+        };
+
+        try {
+          const events = JSON.parse(booking.calendar_event_id);
+          for (const ev of events) {
+            const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(ev.connectionId);
+            if (connection) await deleteEv(connection, ev.eventId);
+          }
+        } catch (err) {
+          if (booking.write_calendar_id) {
+            const connection = app.db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND status = 'connected'").get(booking.write_calendar_id);
+            if (connection) await deleteEv(connection, booking.calendar_event_id);
+          }
+        }
+      }
+
+      app.db.prepare("DELETE FROM bookings WHERE id = ?").run(id);
       return reply.redirect('/admin/bookings');
     });
 

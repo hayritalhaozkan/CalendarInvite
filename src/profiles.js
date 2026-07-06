@@ -65,7 +65,10 @@ function parseAttendeesFromBody(body) {
   const raw = body['attendees[]'];
   if (!raw) return [];
   const arr = Array.isArray(raw) ? raw : [raw];
-  return arr.filter(e => e && e.trim()).map(e => e.trim());
+  return arr
+    .flatMap(e => e.split(','))
+    .filter(e => e && e.trim())
+    .map(e => e.trim());
 }
 
 function parseOverridesFromBody(body) {
@@ -125,19 +128,23 @@ function overridesHtml(overrides) {
       <div style="margin-top: 1rem; border: 1px solid var(--border-color); padding: 1rem; border-radius: 8px;">
         <h4 style="margin-top: 0; margin-bottom: 1rem;">Add New Override</h4>
         <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
-          <label>Date <input type="date" id="new_override_date"></label>
-          <label>Type
-            <select id="new_override_type">
+          <div style="display: flex; flex-direction: column; margin-bottom: 0;">
+            <label for="new_override_date" style="margin-bottom: 0.25rem; font-size: 0.875rem;">Date</label>
+            <input type="date" id="new_override_date" style="margin-bottom: 0;">
+          </div>
+          <div style="display: flex; flex-direction: column; margin-bottom: 0;">
+            <label for="new_override_type" style="margin-bottom: 0.25rem; font-size: 0.875rem;">Type</label>
+            <select id="new_override_type" style="margin-bottom: 0;">
               <option value="blocked">Block entire day</option>
               <option value="custom">Custom hours</option>
             </select>
-          </label>
-          <div id="new_override_custom" style="display:none; gap: 0.5rem; align-items: center;">
+          </div>
+          <div id="new_override_custom" style="display:none; gap: 0.5rem; align-items: center; margin-bottom: 0;">
             <input type="text" class="time-picker-override" id="new_override_start" value="09:00" style="width: 100px; margin-bottom: 0;">
-            <span>-</span>
+            <span style="margin-bottom: 0;">-</span>
             <input type="text" class="time-picker-override" id="new_override_end" value="17:00" style="width: 100px; margin-bottom: 0;">
           </div>
-          <button type="button" id="add-override-btn" class="outline" style="margin-bottom: 0;">Add Override</button>
+          <button type="button" id="add-override-btn" class="outline" style="margin-bottom: 0; padding-top: 0.5rem; padding-bottom: 0.5rem;">Add Override</button>
         </div>
       </div>
     </fieldset>
@@ -169,9 +176,8 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
     `<label><input type="checkbox" name="read_calendar_ids[]" value="${c.id}" ${readCalendarIds.includes(c.id) ? 'checked' : ''}> ${escapeHtml(c.email)} (${c.provider})</label>`
   ).join('');
 
-  const attendeeInputs = attendees.length > 0
-    ? attendees.map(e => `<input type="text" name="attendees[]" value="${escapeHtml(e)}">`).join('')
-    : '<input type="text" name="attendees[]" value="">';
+  const attendeeValue = attendees.length > 0 ? escapeHtml(attendees.join(', ')) : '';
+  const attendeeInputs = `<input type="text" name="attendees[]" value="${attendeeValue}" placeholder="colleague@example.com, other@example.com">`;
 
   const scheduleHtml = `<div class="schedule-grid">` + DAYS.map((dayName, dayIdx) => {
     const daySchedules = (schedules.templates || []).filter(s => s.day_of_week === dayIdx);
@@ -272,7 +278,7 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
 
         <fieldset>
           <legend>Default Attendees</legend>
-          <small style="color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Email addresses to include in every booking</small>
+          <small style="color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Email addresses to include in every booking (separate multiple emails with commas)</small>
           ${attendeeInputs}
         </fieldset>
 
