@@ -99,13 +99,13 @@ function computeSlots(db, profileId, dateStr, durationMinutes, now) {
   return slots;
 }
 
-function removeConflicts(slots, busyPeriods) {
+function removeConflicts(slots, busyPeriods, bufferMs = 0) {
   return slots.filter(slot => {
     const slotStart = new Date(slot.start).getTime();
     const slotEnd = new Date(slot.end).getTime();
     for (const busy of busyPeriods) {
-      const busyStart = new Date(busy.start).getTime();
-      const busyEnd = new Date(busy.end).getTime();
+      const busyStart = new Date(busy.start).getTime() - bufferMs;
+      const busyEnd = new Date(busy.end).getTime() + bufferMs;
       if (slotStart < busyEnd && slotEnd > busyStart) {
         return false;
       }
@@ -573,14 +573,15 @@ function registerSlotsApi(app, { encryptionKey }) {
     const now = new Date();
     let slots = computeSlots(app.db, profile.id, date, durationMinutes, now);
 
+    const bufferMs = (profile.buffer_time_minutes || 0) * 60 * 1000;
     const existingBookings = getExistingBookings(app.db, profile.id, date);
     if (existingBookings.length > 0) {
-      slots = removeConflicts(slots, existingBookings);
+      slots = removeConflicts(slots, existingBookings, bufferMs);
     }
 
     const busySlots = await getCalendarBusySlots(app.db, encryptionKey, profile.id, date, app.fetchFn);
     if (busySlots.length > 0) {
-      slots = removeConflicts(slots, busySlots);
+      slots = removeConflicts(slots, busySlots, bufferMs);
     }
 
     return { slots };
@@ -716,14 +717,15 @@ function registerBookingSubmitApi(app, { encryptionKey }) {
     const now = new Date();
     let slots = computeSlots(app.db, profile.id, dateStr, durationMinutes, now);
 
+    const bufferMs = (profile.buffer_time_minutes || 0) * 60 * 1000;
     const existingBookings = getExistingBookings(app.db, profile.id, dateStr);
     if (existingBookings.length > 0) {
-      slots = removeConflicts(slots, existingBookings);
+      slots = removeConflicts(slots, existingBookings, bufferMs);
     }
 
     const busySlots = await getCalendarBusySlots(app.db, encryptionKey, profile.id, dateStr, app.fetchFn);
     if (busySlots.length > 0) {
-      slots = removeConflicts(slots, busySlots);
+      slots = removeConflicts(slots, busySlots, bufferMs);
     }
 
     const slotAvailable = slots.some(s => s.start === startDate.toISOString());

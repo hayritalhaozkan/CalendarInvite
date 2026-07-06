@@ -29,6 +29,7 @@ function initializeSchema(db) {
       write_calendar_id INTEGER REFERENCES calendar_connections(id),
       meeting_link_url TEXT,
       meeting_tool TEXT CHECK(meeting_tool IN ('teams', 'meet')),
+      buffer_time_minutes INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
 
@@ -106,6 +107,13 @@ function createDatabase(dbPath) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   initializeSchema(db);
+
+  // Migration: add buffer_time_minutes to existing databases that predate this column
+  const cols = db.pragma('table_info(booking_profiles)');
+  if (!cols.some(c => c.name === 'buffer_time_minutes')) {
+    db.exec('ALTER TABLE booking_profiles ADD COLUMN buffer_time_minutes INTEGER NOT NULL DEFAULT 0');
+  }
+
   return db;
 }
 

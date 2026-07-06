@@ -260,6 +260,34 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
               <option value="teams" ${profile?.meeting_tool === 'teams' ? 'selected' : ''}>Microsoft Teams</option>
             </select>
           </label>
+
+          <div style="margin-top: 0.5rem;">
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Buffer Time Between Meetings</div>
+            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 8px; background: var(--neutral-10); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 16px;">
+                <input
+                  type="number"
+                  id="buffer_time_minutes"
+                  name="buffer_time_minutes"
+                  value="${profile?.buffer_time_minutes ?? 0}"
+                  min="0" max="120" step="5"
+                  style="width: 64px; font-size: 22px; font-weight: 700; text-align: center; border: none; background: transparent; color: var(--primary); margin: 0; padding: 0; -moz-appearance: textfield;"
+                >
+                <span style="font-size: 13px; color: var(--text-secondary); line-height: 1.3;">min<br>buffer</span>
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${[0, 5, 10, 15, 30].map(v => `
+                  <button type="button"
+                    onclick="document.getElementById('buffer_time_minutes').value=${v}"
+                    style="padding: 6px 14px; font-size: 13px; font-weight: 600; border-radius: 20px; border: 1.5px solid var(--border-color); background: ${(profile?.buffer_time_minutes ?? 0) == v ? 'var(--primary)' : 'var(--neutral-0)'}; color: ${(profile?.buffer_time_minutes ?? 0) == v ? '#fff' : 'var(--text-secondary)'}; cursor: pointer; transition: all 0.15s;">
+                    ${v === 0 ? 'None' : v + ' min'}
+                  </button>`).join('')}
+              </div>
+            </div>
+            <p style="margin-top: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 0;">
+              Adds a gap before and after each booking. A 15 min buffer means no new booking can start within 15 min of an existing one.
+            </p>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -551,9 +579,11 @@ function registerProfileRoutes(app) {
       return reply.type('text/html').send(require('./app').BASE_LAYOUT('New Profile', html));
     }
 
+    const buffer_time_minutes = parseInt(request.body.buffer_time_minutes, 10) || 0;
+
     const result = app.db.prepare(
-      "INSERT INTO booking_profiles (slug, name, is_active, write_calendar_id, meeting_link_url, meeting_tool, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)"
-    ).run(slug, name, null, meeting_link_url || null, meeting_tool || null, new Date().toISOString());
+      "INSERT INTO booking_profiles (slug, name, is_active, write_calendar_id, meeting_link_url, meeting_tool, buffer_time_minutes, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?)"
+    ).run(slug, name, null, meeting_link_url || null, meeting_tool || null, buffer_time_minutes, new Date().toISOString());
 
     const profileId = result.lastInsertRowid;
 
@@ -625,6 +655,7 @@ function registerProfileRoutes(app) {
     }
 
     const { slug, name, meeting_link_url, meeting_tool } = request.body || {};
+    const buffer_time_minutes = parseInt(request.body.buffer_time_minutes, 10) || 0;
 
     if (!slug || !SLUG_REGEX.test(slug)) {
       const token = reply.generateCsrf();
@@ -646,8 +677,8 @@ function registerProfileRoutes(app) {
     }
 
     app.db.prepare(
-      "UPDATE booking_profiles SET slug = ?, name = ?, write_calendar_id = ?, meeting_link_url = ?, meeting_tool = ? WHERE id = ?"
-    ).run(slug, name, null, meeting_link_url || null, meeting_tool || null, id);
+      "UPDATE booking_profiles SET slug = ?, name = ?, write_calendar_id = ?, meeting_link_url = ?, meeting_tool = ?, buffer_time_minutes = ? WHERE id = ?"
+    ).run(slug, name, null, meeting_link_url || null, meeting_tool || null, buffer_time_minutes, id);
 
     // Replace attendees
     app.db.prepare("DELETE FROM default_attendees WHERE profile_id = ?").run(id);
