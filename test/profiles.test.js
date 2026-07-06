@@ -202,16 +202,23 @@ describe('Booking Profile CRUD', () => {
 
       const profile = app.db.prepare("SELECT * FROM booking_profiles WHERE slug = ?").get('with-schedule');
       const templates = app.db.prepare("SELECT * FROM schedule_templates WHERE profile_id = ? ORDER BY day_of_week, start_time").all(profile.id);
+      const convertTimeToUTC = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        const now = new Date();
+        const localDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+        return `${String(localDate.getUTCHours()).padStart(2, '0')}:${String(localDate.getUTCMinutes()).padStart(2, '0')}`;
+      };
+
       assert.equal(templates.length, 3);
       assert.equal(templates[0].day_of_week, 1);
-      assert.equal(templates[0].start_time, '09:00');
-      assert.equal(templates[0].end_time, '12:00');
+      assert.equal(templates[0].start_time, convertTimeToUTC('09:00'));
+      assert.equal(templates[0].end_time, convertTimeToUTC('12:00'));
       assert.equal(templates[1].day_of_week, 1);
-      assert.equal(templates[1].start_time, '14:00');
-      assert.equal(templates[1].end_time, '17:00');
+      assert.equal(templates[1].start_time, convertTimeToUTC('14:00'));
+      assert.equal(templates[1].end_time, convertTimeToUTC('17:00'));
       assert.equal(templates[2].day_of_week, 3);
-      assert.equal(templates[2].start_time, '10:00');
-      assert.equal(templates[2].end_time, '16:00');
+      assert.equal(templates[2].start_time, convertTimeToUTC('10:00'));
+      assert.equal(templates[2].end_time, convertTimeToUTC('16:00'));
 
       app.db.prepare("DELETE FROM schedule_templates WHERE profile_id = ?").run(profile.id);
       app.db.prepare("DELETE FROM booking_profiles WHERE id = ?").run(profile.id);

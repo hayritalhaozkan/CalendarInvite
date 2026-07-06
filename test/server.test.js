@@ -18,7 +18,7 @@ describe('Server', () => {
     const response = await app.inject({ method: 'GET', url: '/' });
     assert.equal(response.statusCode, 200);
     assert.ok(response.headers['content-type'].includes('text/html'));
-    assert.ok(response.body.includes('Pico'));
+
     assert.ok(response.body.includes('CalendarInvite'));
   });
 

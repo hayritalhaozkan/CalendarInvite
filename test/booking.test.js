@@ -3,6 +3,16 @@ const assert = require('node:assert/strict');
 const bcrypt = require('bcrypt');
 const { buildApp } = require('../src/app');
 
+// Always returns next Monday's date as YYYY-MM-DD (never today)
+function getNextMonday() {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  // Days until next Monday: if today is Monday (1), that's 7 days away
+  const daysUntilMonday = ((8 - d.getUTCDay()) % 7) || 7;
+  d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+  return d.toISOString().split('T')[0];
+}
+
 function createTestApp(fetchFn) {
   return buildApp({
     dbPath: ':memory:',
@@ -69,7 +79,7 @@ describe('Public Booking Page', () => {
       const profileId = seedProfile(app.db, { slug: 'inactive', is_active: 0 });
       const response = await app.inject({ method: 'GET', url: '/book/inactive' });
       assert.equal(response.statusCode, 200);
-      assert.ok(response.body.includes('Not currently accepting bookings'));
+      assert.ok(response.body.includes('not currently accepting bookings'));
       app.db.prepare("DELETE FROM booking_profiles WHERE id = ?").run(profileId);
     });
 
@@ -130,9 +140,10 @@ describe('Availability Slots API', () => {
         { day: 1, start: '09:00', end: '12:00' },
       ]);
 
+      const monday = getNextMonday();
       const response = await app.inject({
         method: 'GET',
-        url: '/api/book/template-slots/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/template-slots/slots?date=${monday}&duration=30&timezone=UTC`,
       });
       assert.equal(response.statusCode, 200);
       const data = JSON.parse(response.body);
@@ -140,10 +151,10 @@ describe('Availability Slots API', () => {
       assert.ok(data.slots.length > 0);
       // 09:00-12:00 = 3 hours = 6 slots of 30 min
       assert.equal(data.slots.length, 6);
-      assert.equal(data.slots[0].start, '2026-07-06T09:00:00.000Z');
-      assert.equal(data.slots[0].end, '2026-07-06T09:30:00.000Z');
-      assert.equal(data.slots[5].start, '2026-07-06T11:30:00.000Z');
-      assert.equal(data.slots[5].end, '2026-07-06T12:00:00.000Z');
+      assert.equal(data.slots[0].start, `${monday}T09:00:00.000Z`);
+      assert.equal(data.slots[0].end, `${monday}T09:30:00.000Z`);
+      assert.equal(data.slots[5].start, `${monday}T11:30:00.000Z`);
+      assert.equal(data.slots[5].end, `${monday}T12:00:00.000Z`);
 
       app.db.prepare("DELETE FROM schedule_templates WHERE profile_id = ?").run(profileId);
       app.db.prepare("DELETE FROM booking_profiles WHERE id = ?").run(profileId);
@@ -158,7 +169,7 @@ describe('Availability Slots API', () => {
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/book/no-template/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/no-template/slots?date=${getNextMonday()}&duration=30&timezone=UTC`,
       });
       assert.equal(response.statusCode, 200);
       const data = JSON.parse(response.body);
@@ -173,11 +184,12 @@ describe('Availability Slots API', () => {
       seedScheduleTemplate(app.db, profileId, [
         { day: 1, start: '09:00', end: '12:00' },
       ]);
-      seedOverride(app.db, profileId, { date: '2026-07-06', is_blocked: true });
+      const monday = getNextMonday();
+      seedOverride(app.db, profileId, { date: monday, is_blocked: true });
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/book/blocked-day/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/blocked-day/slots?date=${monday}&duration=30&timezone=UTC`,
       });
       assert.equal(response.statusCode, 200);
       const data = JSON.parse(response.body);
@@ -193,21 +205,22 @@ describe('Availability Slots API', () => {
       seedScheduleTemplate(app.db, profileId, [
         { day: 1, start: '09:00', end: '17:00' },
       ]);
+      const monday = getNextMonday();
       seedOverride(app.db, profileId, {
-        date: '2026-07-06',
+        date: monday,
         is_blocked: false,
         custom_ranges: [{ start: '10:00', end: '12:00' }],
       });
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/book/custom-override/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/custom-override/slots?date=${monday}&duration=30&timezone=UTC`,
       });
       assert.equal(response.statusCode, 200);
       const data = JSON.parse(response.body);
       // Custom override replaces template: only 10:00-12:00 = 4 slots
       assert.equal(data.slots.length, 4);
-      assert.equal(data.slots[0].start, '2026-07-06T10:00:00.000Z');
+      assert.equal(data.slots[0].start, `${monday}T10:00:00.000Z`);
 
       app.db.prepare("DELETE FROM schedule_overrides WHERE profile_id = ?").run(profileId);
       app.db.prepare("DELETE FROM schedule_templates WHERE profile_id = ?").run(profileId);
@@ -219,22 +232,23 @@ describe('Availability Slots API', () => {
       seedScheduleTemplate(app.db, profileId, [
         { day: 1, start: '09:00', end: '12:00' },
       ]);
+      const monday = getNextMonday();
       // Book 09:00-09:30
       seedBooking(app.db, profileId, {
-        start_time: '2026-07-06T09:00:00.000Z',
-        end_time: '2026-07-06T09:30:00.000Z',
+        start_time: `${monday}T09:00:00.000Z`,
+        end_time: `${monday}T09:30:00.000Z`,
         duration_minutes: 30,
       });
 
       const response = await app.inject({
         method: 'GET',
-        url: '/api/book/booking-conflict/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/booking-conflict/slots?date=${monday}&duration=30&timezone=UTC`,
       });
       assert.equal(response.statusCode, 200);
       const data = JSON.parse(response.body);
       // 6 slots - 1 booked = 5
       assert.equal(data.slots.length, 5);
-      assert.equal(data.slots[0].start, '2026-07-06T09:30:00.000Z');
+      assert.equal(data.slots[0].start, `${monday}T09:30:00.000Z`);
 
       app.db.prepare("DELETE FROM bookings WHERE profile_id = ?").run(profileId);
       app.db.prepare("DELETE FROM schedule_templates WHERE profile_id = ?").run(profileId);
@@ -311,23 +325,24 @@ describe('Availability Slots API', () => {
         { day: 1, start: '09:00', end: '10:00' },
       ]);
 
+      const monday = getNextMonday();
       const response30 = await app.inject({
         method: 'GET',
-        url: '/api/book/duration-fit/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/duration-fit/slots?date=${monday}&duration=30&timezone=UTC`,
       });
       const data30 = JSON.parse(response30.body);
       assert.equal(data30.slots.length, 2);
 
       const response60 = await app.inject({
         method: 'GET',
-        url: '/api/book/duration-fit/slots?date=2026-07-06&duration=60&timezone=UTC',
+        url: `/api/book/duration-fit/slots?date=${monday}&duration=60&timezone=UTC`,
       });
       const data60 = JSON.parse(response60.body);
       assert.equal(data60.slots.length, 1);
 
       const response45 = await app.inject({
         method: 'GET',
-        url: '/api/book/duration-fit/slots?date=2026-07-06&duration=45&timezone=UTC',
+        url: `/api/book/duration-fit/slots?date=${monday}&duration=45&timezone=UTC`,
       });
       const data45 = JSON.parse(response45.body);
       assert.equal(data45.slots.length, 1);
@@ -339,13 +354,14 @@ describe('Availability Slots API', () => {
     it('removes slots conflicting with calendar busy events', async () => {
       const mockFetch = (url, opts) => {
         if (typeof url === 'string' && url.includes('freeBusy')) {
+          const monday = getNextMonday();
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({
               calendars: {
                 primary: {
                   busy: [
-                    { start: '2026-07-06T09:00:00Z', end: '2026-07-06T10:00:00Z' },
+                    { start: `${monday}T09:00:00Z`, end: `${monday}T10:00:00Z` },
                   ],
                 },
               },
@@ -372,15 +388,16 @@ describe('Availability Slots API', () => {
       const connId = connResult.lastInsertRowid;
       calApp.db.prepare("INSERT INTO profile_read_calendars (profile_id, calendar_connection_id) VALUES (?, ?)").run(profileId, connId);
 
+      const monday = getNextMonday();
       const response = await calApp.inject({
         method: 'GET',
-        url: '/api/book/cal-conflict/slots?date=2026-07-06&duration=30&timezone=UTC',
+        url: `/api/book/cal-conflict/slots?date=${monday}&duration=30&timezone=UTC`,
       });
       assert.equal(response.statusCode, 200);
       const data = JSON.parse(response.body);
       // 09:00-10:00 blocked by busy => only 10:00-12:00 = 4 slots
       assert.equal(data.slots.length, 4);
-      assert.equal(data.slots[0].start, '2026-07-06T10:00:00.000Z');
+      assert.equal(data.slots[0].start, `${monday}T10:00:00.000Z`);
 
       await calApp.close();
     });

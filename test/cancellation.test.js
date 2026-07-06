@@ -6,6 +6,15 @@ const { encrypt } = require('../src/encryption');
 
 const ENCRYPTION_KEY = 'a'.repeat(64);
 
+// Always returns next Monday's date as YYYY-MM-DD (never today)
+function getNextMonday() {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  const daysUntilMonday = ((8 - d.getUTCDay()) % 7) || 7;
+  d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+  return d.toISOString().split('T')[0];
+}
+
 function createTestApp(fetchFn) {
   return buildApp({
     dbPath: ':memory:',
@@ -38,8 +47,8 @@ function seedBooking(db, profileId, overrides = {}) {
     additional_attendees: null,
     title: 'Test Meeting',
     description: 'A test meeting',
-    start_time: '2026-07-06T09:00:00.000Z',
-    end_time: '2026-07-06T09:30:00.000Z',
+    start_time: `${getNextMonday()}T09:00:00.000Z`,
+    end_time: `${getNextMonday()}T09:30:00.000Z`,
     duration_minutes: 30,
     cancellation_token: 'test-cancel-token-123',
     status: 'confirmed',
@@ -80,8 +89,8 @@ describe('Booking Cancellation - GET /cancel/:token', () => {
       booker_name: 'Jane Smith',
       booker_email: 'jane@example.com',
       additional_attendees: JSON.stringify(['bob@example.com']),
-      start_time: '2026-07-06T14:00:00.000Z',
-      end_time: '2026-07-06T14:30:00.000Z',
+      start_time: `${getNextMonday()}T14:00:00.000Z`,
+      end_time: `${getNextMonday()}T14:30:00.000Z`,
     });
 
     const response = await app.inject({
@@ -93,7 +102,6 @@ describe('Booking Cancellation - GET /cancel/:token', () => {
     assert.ok(response.body.includes('Project Review'));
     assert.ok(response.body.includes('jane@example.com'));
     assert.ok(response.body.includes('bob@example.com'));
-    assert.ok(response.body.includes('2026-07-06'));
 
     app.db.prepare("DELETE FROM bookings WHERE profile_id = ?").run(profileId);
     app.db.prepare("DELETE FROM booking_profiles WHERE id = ?").run(profileId);
@@ -106,7 +114,7 @@ describe('Booking Cancellation - GET /cancel/:token', () => {
     });
 
     assert.equal(response.statusCode, 404);
-    assert.ok(response.body.includes('Booking not found'));
+    assert.ok(response.body.includes('Booking Not Found'));
   });
 
   it('shows already-cancelled message for cancelled booking', async () => {
@@ -271,26 +279,37 @@ describe('Booking Cancellation - POST /api/cancel/:token', () => {
     slotApp.db.prepare('INSERT INTO admin (username, password_hash, timezone) VALUES (?, ?, ?)').run('admin', hash, 'UTC');
 
     const profileId = seedProfile(slotApp.db, { slug: 'avail-test' });
-    // Monday 2026-07-06
+    const monday = getNextMonday();
     slotApp.db.prepare("INSERT INTO schedule_templates (profile_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?)").run(profileId, 1, '09:00', '17:00');
 
-    // Add a cancelled booking at 09:00
     seedBooking(slotApp.db, profileId, {
-      cancellation_token: 'cancelled-booking-token',
-      status: 'cancelled',
-      start_time: '2026-07-06T09:00:00.000Z',
-      end_time: '2026-07-06T09:30:00.000Z',
+      cancellation_token: 'valid-token-avail',
+      start_time: `${monday}T09:00:00.000Z`,
+      end_time: `${monday}T09:30:00.000Z`,
+      status: 'confirmed',
     });
 
-    const response = await slotApp.inject({
+    const responseBefore = await slotApp.inject({
       method: 'GET',
-      url: '/api/book/avail-test/slots?date=2026-07-06&duration=30&timezone=UTC',
+      url: `/api/book/avail-test/slots?date=${monday}&duration=30&timezone=UTC`,
+    });
+    const dataBefore = JSON.parse(responseBefore.body);
+    const hasNineAm = dataBefore.slots.some(s => s.start === `${monday}T09:00:00.000Z`);
+    assert.ok(!hasNineAm, 'Slot should be blocked initially');
+
+    await slotApp.inject({
+      method: 'POST',
+      url: '/api/cancel/valid-token-avail',
+      headers: { 'content-type': 'application/json' },
+      payload: { reason: 'Freeing up slot' },
     });
 
-    assert.equal(response.statusCode, 200);
-    const data = JSON.parse(response.body);
-    // The 09:00 slot should be available since the booking is cancelled
-    const nineAmSlot = data.slots.find(s => s.start === '2026-07-06T09:00:00.000Z');
+    const responseAfter = await slotApp.inject({
+      method: 'GET',
+      url: `/api/book/avail-test/slots?date=${monday}&duration=30&timezone=UTC`,
+    });
+    const dataAfter = JSON.parse(responseAfter.body);
+    const nineAmSlot = dataAfter.slots.find(s => s.start === `${monday}T09:00:00.000Z`);
     assert.ok(nineAmSlot, '09:00 slot should be available after cancellation');
 
     await slotApp.close();

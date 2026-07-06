@@ -6,6 +6,15 @@ const { encrypt } = require('../src/encryption');
 
 const ENCRYPTION_KEY = 'a'.repeat(64);
 
+// Always returns next Monday's date as YYYY-MM-DD (never today)
+function getNextMonday() {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  const daysUntilMonday = ((8 - d.getUTCDay()) % 7) || 7;
+  d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+  return d.toISOString().split('T')[0];
+}
+
 function createTestApp(fetchFn) {
   return buildApp({
     dbPath: ':memory:',
@@ -70,7 +79,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
         payload: {
           name: 'Rate Test',
           email: 'ratelimit@example.com',
-          start_time: `2026-07-06T${hour}:00:00.000Z`,
+          start_time: `${getNextMonday()}T${hour}:00:00.000Z`,
           duration: 30,
           timezone: 'UTC',
         },
@@ -86,7 +95,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
       payload: {
         name: 'Rate Test',
         email: 'ratelimit@example.com',
-        start_time: '2026-07-06T14:00:00.000Z',
+        start_time: `${getNextMonday()}T14:00:00.000Z`,
         duration: 30,
         timezone: 'UTC',
       },
@@ -111,7 +120,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
     for (let i = 0; i < 20; i++) {
       await app.inject({
         method: 'GET',
-        url: '/api/book/rate-ip-test/slots?date=2026-07-06&duration=30',
+        url: `/api/book/rate-ip-test/slots?date=${getNextMonday()}&duration=30`,
         headers: { 'x-forwarded-for': '192.168.1.100' },
       });
     }
@@ -119,7 +128,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
     // 21st request should be rate limited
     const response = await app.inject({
       method: 'GET',
-      url: '/api/book/rate-ip-test/slots?date=2026-07-06&duration=30',
+      url: `/api/book/rate-ip-test/slots?date=${getNextMonday()}&duration=30`,
       headers: { 'x-forwarded-for': '192.168.1.100' },
     });
 
@@ -152,7 +161,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
     // Make a request to trigger cleanup
     await app.inject({
       method: 'GET',
-      url: '/api/book/rate-cleanup-test/slots?date=2026-07-06&duration=30',
+      url: `/api/book/rate-cleanup-test/slots?date=${getNextMonday()}&duration=30`,
       headers: { 'x-forwarded-for': '10.0.0.1' },
     });
 
@@ -180,7 +189,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
         payload: {
           name: 'User A',
           email: 'usera@example.com',
-          start_time: `2026-07-06T${hour}:00:00.000Z`,
+          start_time: `${getNextMonday()}T${hour}:00:00.000Z`,
           duration: 30,
           timezone: 'UTC',
         },
@@ -195,7 +204,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
       payload: {
         name: 'User B',
         email: 'userb@example.com',
-        start_time: '2026-07-06T14:00:00.000Z',
+        start_time: `${getNextMonday()}T14:00:00.000Z`,
         duration: 30,
         timezone: 'UTC',
       },
@@ -223,7 +232,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
         payload: {
           name: 'Racer One',
           email: 'racer1@example.com',
-          start_time: '2026-07-06T09:00:00.000Z',
+          start_time: `${getNextMonday()}T09:00:00.000Z`,
           duration: 30,
           timezone: 'UTC',
         },
@@ -235,7 +244,7 @@ describe('Rate Limiting - POST /api/book/:slug', () => {
         payload: {
           name: 'Racer Two',
           email: 'racer2@example.com',
-          start_time: '2026-07-06T09:00:00.000Z',
+          start_time: `${getNextMonday()}T09:00:00.000Z`,
           duration: 30,
           timezone: 'UTC',
         },
