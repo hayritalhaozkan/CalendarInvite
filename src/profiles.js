@@ -217,13 +217,13 @@ function profileFormHtml(token, profile, calendars, attendees, schedules, error,
   const overrideSection = overridesHtml(overrides || []);
 
   return `
-    <nav>
-      <a href="/admin/dashboard">Dashboard</a>
-      <a href="/admin/bookings">Bookings</a>
-      <a href="/admin/profiles">Profiles</a>
-      <a href="/admin/calendars">Calendars</a>
-      <a href="/admin/settings">Settings</a>
-    </nav>
+            <nav>
+          <a href="/admin/dashboard"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles" class="nav-active"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings"><i class="ph-duotone ph-gear"></i> Settings</a>
+        </nav>
     <h1>${title}</h1>
     ${error ? `<div role="alert" class="error">${escapeHtml(error)}</div>` : ''}
     <div class="card">
@@ -507,13 +507,13 @@ function registerProfileRoutes(app) {
     `}).join('');
 
     const html = `
-      <nav>
-        <a href="/admin/dashboard">Dashboard</a>
-        <a href="/admin/bookings">Bookings</a>
-        <a href="/admin/profiles">Profiles</a>
-        <a href="/admin/calendars">Calendars</a>
-        <a href="/admin/settings">Settings</a>
-      </nav>
+              <nav>
+          <a href="/admin/dashboard"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles" class="nav-active"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings"><i class="ph-duotone ph-gear"></i> Settings</a>
+        </nav>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
         <h1 style="margin-bottom: 0;">Booking Profiles</h1>
         <a href="/admin/profiles/new" role="button">+ New Profile</a>

@@ -43,6 +43,7 @@ const BASE_LAYOUT = (title, body) => `<!DOCTYPE html>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="stylesheet" type="text/css" href="https://npmcdn.com/flatpickr/dist/themes/airbnb.css">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -110,13 +111,9 @@ function buildApp(opts = {}) {
   app.get('/', async (request, reply) => {
     reply.type('text/html').send(BASE_LAYOUT('Home', `
       <div style="text-align: center; padding: 4rem 0;">
-        <h1 style="font-size: 3rem; margin-bottom: 1rem;">CalendarInvite</h1>
-        <p style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 2rem;">Modern self-hosted booking solution</p>
-        <p style="max-width: 600px; margin: 0 auto 2rem;">
-          Seamlessly manage your availability and let others book time with you.
-          Connect your calendar, set your schedule, and share your booking link.
-        </p>
-        <a href="/admin/login" role="button">Admin Login</a>
+        <i class="ph-duotone ph-calendar-blank" style="font-size: 4rem; color: var(--primary); margin-bottom: 1rem;"></i>
+        <h1 style="font-size: 3rem; margin-bottom: 2rem;">CalendarInvite</h1>
+        <a href="/admin/login" role="button" style="padding: 12px 32px; font-size: 1rem;">Admin Login →</a>
       </div>
     `));
   });
@@ -132,10 +129,11 @@ function buildApp(opts = {}) {
     app.get('/login', async (request, reply) => {
       const token = reply.generateCsrf();
       reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
-        <div style="max-width: 450px; margin: 4rem auto;">
+        <div class="login-card">
           <article>
-            <h1 style="text-align: center; margin-bottom: 2rem;">CalendarInvite</h1>
-            <h2 style="text-align: center; font-size: 1.25rem; margin-bottom: 2rem; color: var(--text-secondary);">Admin Login</h2>
+            <div class="login-logo"><i class="ph-duotone ph-calendar-blank" style="font-size: 3rem; color: var(--primary);"></i></div>
+            <div class="login-title">CalendarInvite</div>
+            <div class="login-subtitle">Welcome back! Sign in to your admin panel.</div>
             <form method="POST" action="/admin/login">
               <input type="hidden" name="_csrf" value="${token}">
               <label>
@@ -146,7 +144,7 @@ function buildApp(opts = {}) {
                 Password
                 <input type="password" name="password" placeholder="Enter your password" required>
               </label>
-              <button type="submit" style="width: 100%;">Sign In</button>
+              <button type="submit" style="width: 100%;">Sign In →</button>
             </form>
           </article>
         </div>
@@ -160,10 +158,11 @@ function buildApp(opts = {}) {
       if (!admin || !(await bcrypt.compare(password || '', admin.password_hash))) {
         const token = reply.generateCsrf();
         return reply.type('text/html').send(BASE_LAYOUT('Admin Login', `
-          <div style="max-width: 450px; margin: 4rem auto;">
+          <div class="login-card">
             <article>
-              <h1 style="text-align: center; margin-bottom: 2rem;">CalendarInvite</h1>
-              <h2 style="text-align: center; font-size: 1.25rem; margin-bottom: 2rem; color: var(--text-secondary);">Admin Login</h2>
+              <div class="login-logo">📅</div>
+              <div class="login-title">CalendarInvite</div>
+              <div class="login-subtitle">Welcome back! Sign in to your admin panel.</div>
               <div role="alert" class="error">
                 Invalid username or password. Please try again.
               </div>
@@ -177,7 +176,7 @@ function buildApp(opts = {}) {
                   Password
                   <input type="password" name="password" placeholder="Enter your password" required>
                 </label>
-                <button type="submit" style="width: 100%;">Sign In</button>
+                <button type="submit" style="width: 100%;">Sign In →</button>
               </form>
             </article>
           </div>
@@ -224,20 +223,22 @@ function buildApp(opts = {}) {
       }).join('');
 
       reply.type('text/html').send(BASE_LAYOUT('Dashboard', `
-        <nav>
-          <a href="/admin/dashboard">Dashboard</a>
-          <a href="/admin/bookings">Bookings</a>
-          <a href="/admin/profiles">Profiles</a>
-          <a href="/admin/calendars">Calendars</a>
-          <a href="/admin/settings">Settings</a>
+                <nav>
+          <a href="/admin/dashboard" class="nav-active"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings"><i class="ph-duotone ph-gear"></i> Settings</a>
         </nav>
         <h1>Dashboard</h1>
         <div class="grid">
           <article>
+            <span class="stat-icon"><i class="ph-duotone ph-users" style="font-size: 1.5rem;"></i></span>
             <h3>Active Profiles</h3>
             <p><strong>${activeProfiles}</strong></p>
           </article>
           <article>
+            <span class="stat-icon"><i class="ph-duotone ph-calendar-check" style="font-size: 1.5rem;"></i></span>
             <h3>Upcoming Bookings</h3>
             <p><strong>${upcomingCount}</strong></p>
           </article>
@@ -251,10 +252,14 @@ function buildApp(opts = {}) {
             </table>
           </div>
         ` : '<article><p>No upcoming bookings.</p></article>'}
-        <form method="POST" action="/admin/logout" style="margin-top: 2rem;">
-          <input type="hidden" name="_csrf" value="${token}">
-          <button type="submit" class="secondary">Logout</button>
-        </form>
+        <div style="display:flex; gap:1rem; margin-top:1.5rem; flex-wrap:wrap; align-items:center;">
+          <a href="/admin/profiles/new" role="button" style="font-size:0.875rem;">+ New Profile</a>
+          <a href="/admin/bookings" role="button" class="outline" style="font-size:0.875rem;">View All Bookings</a>
+          <form method="POST" action="/admin/logout" style="margin: 0; padding: 0; border: none; background: none; margin-left: auto;">
+            <input type="hidden" name="_csrf" value="${token}">
+            <button type="submit" class="secondary" style="font-size:0.875rem;"><i class="ph-duotone ph-sign-out" style="margin-right:4px;"></i> Logout</button>
+          </form>
+        </div>
       `));
     });
 
@@ -309,22 +314,21 @@ function buildApp(opts = {}) {
 
       }).join('');
 
-      const pagination = totalPages > 1 ? `<nav><ul>${Array.from({ length: totalPages }, (_, i) => {
-        const p = i + 1;
-        const qs = new URLSearchParams();
-        if (status) qs.set('status', status);
-        if (profile_id) qs.set('profile_id', profile_id);
-        qs.set('page', p);
-        return `<li><a href="/admin/bookings?${qs}"${p === currentPage ? ' aria-current="page"' : ''}>${p}</a></li>`;
-      }).join('')}</ul></nav>` : '';
+      const pagination = totalPages > 1 ? `        <nav>
+          <a href="/admin/dashboard"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings"><i class="ph-duotone ph-gear"></i> Settings</a>
+        </nav>` : '';
 
       reply.type('text/html').send(BASE_LAYOUT('Bookings', `
-        <nav>
-          <a href="/admin/dashboard">Dashboard</a>
-          <a href="/admin/bookings">Bookings</a>
-          <a href="/admin/profiles">Profiles</a>
-          <a href="/admin/calendars">Calendars</a>
-          <a href="/admin/settings">Settings</a>
+                <nav>
+          <a href="/admin/dashboard"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings" class="nav-active"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings"><i class="ph-duotone ph-gear"></i> Settings</a>
         </nav>
         <h1>Bookings</h1>
         <div class="card">
@@ -488,12 +492,12 @@ function buildApp(opts = {}) {
         : '';
 
       reply.type('text/html').send(BASE_LAYOUT('Calendar Connections', `
-        <nav>
-          <a href="/admin/dashboard">Dashboard</a>
-          <a href="/admin/bookings">Bookings</a>
-          <a href="/admin/profiles">Profiles</a>
-          <a href="/admin/calendars">Calendars</a>
-          <a href="/admin/settings">Settings</a>
+                <nav>
+          <a href="/admin/dashboard"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars" class="nav-active"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings"><i class="ph-duotone ph-gear"></i> Settings</a>
         </nav>
         <h1>Calendar Connections</h1>
         ${configNotice}
@@ -712,17 +716,18 @@ function buildApp(opts = {}) {
       ).join('');
 
       reply.type('text/html').send(BASE_LAYOUT('Settings', `
-        <nav>
-          <a href="/admin/dashboard">Dashboard</a>
-          <a href="/admin/bookings">Bookings</a>
-          <a href="/admin/profiles">Profiles</a>
-          <a href="/admin/calendars">Calendars</a>
-          <a href="/admin/settings">Settings</a>
+                <nav>
+          <a href="/admin/dashboard"><i class="ph-duotone ph-squares-four"></i> Dashboard</a>
+          <a href="/admin/bookings"><i class="ph-duotone ph-calendar-check"></i> Bookings</a>
+          <a href="/admin/profiles"><i class="ph-duotone ph-users"></i> Profiles</a>
+          <a href="/admin/calendars"><i class="ph-duotone ph-calendar-plus"></i> Calendars</a>
+          <a href="/admin/settings" class="nav-active"><i class="ph-duotone ph-gear"></i> Settings</a>
         </nav>
         <h1>Settings</h1>
         ${flash ? `<div role="alert" class="success">${escapeHtml(flash)}</div>` : ''}
         <div class="card">
-          <h2>Timezone</h2>
+          <h2 style="display: flex; align-items: center; gap: 8px;"><i class="ph-duotone ph-globe-hemisphere-west"></i> Timezone</h2>
+          <p style="color:var(--text-secondary);font-size:0.875rem;margin-bottom:1rem;">Set your default timezone for displaying booking times.</p>
           <form method="POST" action="/admin/settings/timezone">
             <input type="hidden" name="_csrf" value="${token}">
             <label>
@@ -733,7 +738,8 @@ function buildApp(opts = {}) {
           </form>
         </div>
         <div class="card">
-          <h2>Change Password</h2>
+          <h2 style="display: flex; align-items: center; gap: 8px;"><i class="ph-duotone ph-lock-key"></i> Change Password</h2>
+          <p style="color:var(--text-secondary);font-size:0.875rem;margin-bottom:1rem;">Update your admin password. Make sure to use a strong password.</p>
           <form method="POST" action="/admin/settings/password">
             <input type="hidden" name="_csrf" value="${token}">
             <label>

@@ -263,8 +263,18 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
           <p style="color: var(--text-secondary);">Select a time that works for you</p>
         </div>
         <div id="booking-widget">
+          <div class="step-indicator" id="step-indicator">
+            <div class="step-item active" data-step="1"><div class="step-number">1</div><div class="step-label">Duration</div></div>
+            <div class="step-line"></div>
+            <div class="step-item" data-step="2"><div class="step-number">2</div><div class="step-label">Date</div></div>
+            <div class="step-line"></div>
+            <div class="step-item" data-step="3"><div class="step-number">3</div><div class="step-label">Time</div></div>
+            <div class="step-line"></div>
+            <div class="step-item" data-step="4"><div class="step-number">4</div><div class="step-label">Details</div></div>
+          </div>
           <section id="duration-step">
             <h2>Duration</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; text-align: center;">How long should the meeting be?</p>
             <div role="group">
               <button class="duration-btn" data-duration="30">30 min</button>
               <button class="duration-btn" data-duration="45">45 min</button>
@@ -272,16 +282,19 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
             </div>
           </section>
           <section id="calendar-step" style="display:none">
+            <button type="button" class="back-btn" id="back-to-duration">← Back to Duration</button>
             <h2>Select a Date</h2>
             <div id="calendar-header"></div>
             <div id="calendar-grid"></div>
           </section>
           <section id="slots-step" style="display:none">
+            <button type="button" class="back-btn" id="back-to-calendar">← Back to Calendar</button>
             <h2>Available Times</h2>
             <p id="selected-date-title" style="color: var(--text-secondary); margin-bottom: 1.5rem; font-weight: 500; text-align: center;"></p>
             <div id="time-slots"></div>
           </section>
           <section id="form-step" style="display:none">
+            <button type="button" class="back-btn" id="back-to-slots">← Back to Times</button>
             <h2>Your Information</h2>
             <div id="booking-error" style="display:none"></div>
             <form id="booking-form">
@@ -306,11 +319,12 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
                 Description (optional)
                 <textarea name="description" placeholder="Add any notes or agenda items..." rows="4"></textarea>
               </label>
-              <button type="submit" style="width: 100%;">Confirm Booking</button>
+              <button type="submit" style="width: 100%;">Confirm Booking →</button>
             </form>
           </section>
           <section id="confirmation-step" style="display:none">
-            <h2 style="color: var(--success); text-align: center;">✓ Booking Confirmed</h2>
+            <div style="margin-bottom: 0.5rem;"><i class="ph-duotone ph-check-circle" style="font-size: 4rem; color: var(--success); display: block; margin: 0 auto 0.5rem auto;"></i></div>
+            <h2 style="color: var(--success); text-align: center;">Booking Confirmed</h2>
             <div id="confirmation-details"></div>
           </section>
         </div>
@@ -321,6 +335,18 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
           const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
           let selectedDuration = null;
           let selectedSlotStart = null;
+
+          function updateStepIndicator(activeStep) {
+            document.querySelectorAll('.step-item').forEach(function(item) {
+              var step = parseInt(item.dataset.step);
+              item.classList.remove('active', 'completed');
+              if (step === activeStep) item.classList.add('active');
+              else if (step < activeStep) item.classList.add('completed');
+            });
+            document.querySelectorAll('.step-line').forEach(function(line, idx) {
+              line.classList.toggle('completed', idx < activeStep - 1);
+            });
+          }
 
           document.querySelectorAll('.duration-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
@@ -334,8 +360,28 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
               document.getElementById('calendar-step').style.display = '';
               document.getElementById('slots-step').style.display = 'none';
               document.getElementById('form-step').style.display = 'none';
+              updateStepIndicator(2);
               renderCalendar();
             });
+          });
+
+          // Back buttons
+          document.getElementById('back-to-duration').addEventListener('click', function() {
+            document.getElementById('calendar-step').style.display = 'none';
+            document.getElementById('slots-step').style.display = 'none';
+            document.getElementById('form-step').style.display = 'none';
+            updateStepIndicator(1);
+          });
+
+          document.getElementById('back-to-calendar').addEventListener('click', function() {
+            document.getElementById('slots-step').style.display = 'none';
+            document.getElementById('form-step').style.display = 'none';
+            updateStepIndicator(2);
+          });
+
+          document.getElementById('back-to-slots').addEventListener('click', function() {
+            document.getElementById('form-step').style.display = 'none';
+            updateStepIndicator(3);
           });
 
           function formatDateToYYYYMMDD(date) {
@@ -426,6 +472,7 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
             selectedDate = dateStr;
             document.getElementById('slots-step').style.display = '';
             document.getElementById('form-step').style.display = 'none';
+            updateStepIndicator(3);
 
             var d = new Date(dateStr + 'T00:00:00Z');
             var dateDisplay = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
@@ -462,6 +509,7 @@ function registerBookingRoutes(app, { encryptionKey, baseLayout }) {
                     document.getElementById('form-step').style.display = '';
                     document.getElementById('booking-error').style.display = 'none';
                     document.getElementById('form-step').scrollIntoView({ behavior: 'smooth' });
+                    updateStepIndicator(4);
                   });
                 });
               })
@@ -885,19 +933,20 @@ function registerCancellationPage(app, { encryptionKey, baseLayout }) {
 
     reply.type('text/html').send(baseLayout('Cancel Booking', `
       <div style="max-width: 600px; margin: 3rem auto;">
-        <h1 style="text-align: center; margin-bottom: 1rem;">Cancel Booking</h1>
-        <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">Are you sure you want to cancel this booking?</p>
-        <article>
+        <div style="margin-bottom: 0.5rem;"><i class="ph-duotone ph-warning-circle" style="font-size: 4rem; color: var(--error); display: block; margin: 0 auto 0.5rem auto;"></i></div>
+        <h1 style="text-align: center; margin-bottom: 1rem; color: var(--error);">Cancel Booking</h1>
+        <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">Are you sure you want to cancel this booking? This action cannot be undone.</p>
+        <article style="border-color: var(--error-light); background: linear-gradient(135deg, var(--neutral-0) 0%, rgba(220, 38, 38, 0.05) 100%);">
           <h3>${escapeHtml(booking.title)}</h3>
           <p><strong>When:</strong> ${escapeHtml(startLocal)} - ${escapeHtml(endLocal)}</p>
           <p><strong>Duration:</strong> ${booking.duration_minutes} minutes</p>
           <p><strong>Attendees:</strong><br>${attendees.map(e => escapeHtml(e)).join('<br>')}</p>
         </article>
         <div style="display: flex; gap: 1rem; margin-top: 2rem;">
-          <form method="POST" action="/api/cancel/${escapeHtml(token)}" style="flex: 1; margin: 0;">
-            <button type="submit" class="contrast" style="width: 100%;">Confirm Cancellation</button>
+          <form method="POST" action="/api/cancel/${escapeHtml(token)}" style="flex: 1; margin: 0; background: transparent; border: none; padding: 0;">
+            <button type="submit" class="danger" style="width: 100%;">Yes, Cancel Booking</button>
           </form>
-          <a href="/" role="button" class="outline" style="flex: 1;">Keep Booking</a>
+          <a href="/" role="button" class="secondary" style="flex: 1;">No, Keep Booking</a>
         </div>
       </div>
     `));
